@@ -41,6 +41,11 @@ your_project_directory/
 │   └── *.JPG                    # Original images (must match mask names)
 ```
 
+## Running the script
+Just run the script with this command (make sure you're at the right level of the directory structure):
+```
+python3 mask_color.py
+```
 
 ## Outputs
 
