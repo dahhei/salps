@@ -25,6 +25,7 @@ import sys
 # ==============================================================================
 #  HELPER FUNCTION FOR PACKAGING
 # ==============================================================================
+# This function helps to get the absolute path of resources, especially when using PyInstaller.
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
     try:
@@ -36,8 +37,9 @@ def resource_path(relative_path):
 # ==============================================================================
 #  Advanced Scale Calibration Window Class
 # ==============================================================================
+# This window allows users to select two points on an image and define a scale based on the distance between those points.
 class ScaleCalibrationWindow(Toplevel):
-    # This class remains unchanged from the previous version
+    # Provides a GUI for advanced scale calibration by selecting two points on an image.
     def __init__(self, parent, image):
         super().__init__(parent)
         self.title("Advanced Scale Calibration")
@@ -120,10 +122,10 @@ class ScaleCalibrationWindow(Toplevel):
             cv2.circle(display_img, (lx + LOUPE_RADIUS, ly + LOUPE_RADIUS), LOUPE_RADIUS, (255, 255, 255), 2)
             cv2.line(display_img, (lx + LOUPE_RADIUS, ly), (lx + LOUPE_RADIUS, ly + LOUPE_SIZE), (0, 0, 255), 1)
             cv2.line(display_img, (lx, ly + LOUPE_RADIUS), (lx + LOUPE_SIZE, ly + LOUPE_RADIUS), (0, 0, 255), 1)
-
+    # Converts canvas coordinates to image coordinates and vice versa.
     def canvas_to_image_coords(self, c): return (int((c[0]/self.zoom_level)+self.view_x), int((c[1]/self.zoom_level)+self.view_y))
     def image_to_canvas_coords(self, i): return (int((i[0]-self.view_x)*self.zoom_level), int((i[1]-self.view_y)*self.zoom_level))
-    
+    # Handles mouse wheel events to zoom in or out of the image.
     def on_mouse_wheel(self, e):
         factor = 1.1 if (e.num == 4 or e.delta > 0) else 1 / 1.1
         self.zoom_level = max(self.min_zoom, self.zoom_level * factor)
@@ -132,6 +134,7 @@ class ScaleCalibrationWindow(Toplevel):
         self.view_y = int(img_coords[1] - (e.y / self.zoom_level))
         self.update_display()
 
+    # Handles mouse clicks to select points for the scale line.
     def on_press(self, e):
         if self.p1 and math.dist(self.image_to_canvas_coords(self.p1),(e.x,e.y))<10:
             self.drag_state='p1'; self.selected_point='p1'; self.loupe_active=False; return
@@ -143,17 +146,20 @@ class ScaleCalibrationWindow(Toplevel):
         elif not self.p2:
             self.p2=coords; self.selected_point='p2'; self.info_label.config(text="Drag points or use Arrow Keys. Then Confirm.")
         self.update_display()
-        
+
+    # Handles panning the view when pressing the middle or right mouse button.
     def on_pan_press(self, e):
         self.drag_state='pan'; self.loupe_active=False; self.last_drag_x,self.last_drag_y=e.x,e.y; self.canvas.config(cursor="fleur")
-    
+
+    # Handles dragging points to adjust their positions.
     def on_drag(self, e):
         if self.drag_state in ['p1', 'p2']:
             coords = self.canvas_to_image_coords((e.x, e.y))
             if self.drag_state == 'p1': self.p1 = coords
             else: self.p2 = coords
             self.update_display()
-            
+
+    # Handles panning the view when dragging with the middle or right mouse button.    
     def on_pan_drag(self, e):
         if self.drag_state=='pan':
             dx,dy=e.x-self.last_drag_x,e.y-self.last_drag_y
@@ -161,6 +167,7 @@ class ScaleCalibrationWindow(Toplevel):
             self.last_drag_x,self.last_drag_y=e.x,e.y
             self.update_display()
 
+    # Handles mouse hover events to update the cursor and activate loupe mode.
     def on_hover(self, e):
         self.last_mouse_pos = (e.x, e.y)
         cursor="crosshair"
@@ -171,6 +178,7 @@ class ScaleCalibrationWindow(Toplevel):
         if self.drag_state != 'pan': self.canvas.config(cursor=cursor)
         self.update_display()
 
+    # Handles key presses for nudging the selected point.
     def on_key_press(self, event):
         if not self.selected_point: return
         dx, dy = 0, 0
@@ -183,10 +191,12 @@ class ScaleCalibrationWindow(Toplevel):
             elif self.selected_point == 'p2' and self.p2: self.p2 = (self.p2[0] + dx, self.p2[1] + dy)
             self.update_display()
 
+    # Clears the drawn line and resets the state.
     def clear_line(self):
         self.p1, self.p2, self.drag_state, self.selected_point = None, None, None, None
         self.info_label.config(text="Line cleared. Click START point."); self.update_display()
-        
+
+    # Resets the view to the original image size and zoom level. 
     def reset_view(self):
         canvas_w, canvas_h = self.canvas.winfo_width(), self.canvas.winfo_height()
         if canvas_w <= 1 or canvas_h <= 1: self.after(50, self.reset_view); return
@@ -194,7 +204,8 @@ class ScaleCalibrationWindow(Toplevel):
         self.zoom_level = self.min_zoom
         self.view_x, self.view_y = 0, 0
         self.update_display()
-        
+
+    # Confirms the scale based on the drawn line and user input.   
     def confirm_scale(self):
         if not self.p1 or not self.p2: messagebox.showerror("Error","Please draw a line first.", parent=self); return
         dist_px = math.dist(self.p1, self.p2)
@@ -206,7 +217,8 @@ class ScaleCalibrationWindow(Toplevel):
                 self.scale_unit = unit.strip()
                 self.is_confirmed = True
                 self.destroy()
-            
+
+    # Handles the window closing event, setting the confirmation flag to False.
     def on_closing(self):
         self.is_confirmed=False
         self.destroy()
@@ -214,8 +226,11 @@ class ScaleCalibrationWindow(Toplevel):
 # ==============================================================================
 #  Side Annotation Window
 # ==============================================================================
+
+# This window allows users to annotate the long and short axes of an object in an image, providing options for texture classification.
 class SideAnnotationWindow(Toplevel):
-    # This class remains unchanged from the previous version
+
+    # Provides a GUI for annotating the long and short axes of an object in an image.
     def __init__(self, parent, image, roi, scale_factor, scale_unit):
         super().__init__(parent)
         self.title("Annotate Sides")
@@ -236,6 +251,7 @@ class SideAnnotationWindow(Toplevel):
         self.box_adjusted = self.box - (x-padding, y-padding)
         self.setup_widgets()
 
+    # Sets up the GUI widgets for the annotation window.
     def setup_widgets(self):
         main_frame = tk.Frame(self, padx=10, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
@@ -254,7 +270,7 @@ class SideAnnotationWindow(Toplevel):
         button_frame.pack(pady=(10, 0), fill=tk.X)
         tk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
         tk.Button(button_frame, text="Confirm", command=self.confirm, bg="#4CAF50", fg="white").pack(side=tk.RIGHT)
-
+    # Draws the ROI and bounding box on the canvas.
     def draw_roi_on_canvas(self):
         display_img = self.roi_img.copy()
         cv2.drawContours(display_img, [self.roi_adjusted], -1, (0, 255, 0), 2)
@@ -263,7 +279,7 @@ class SideAnnotationWindow(Toplevel):
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(img_rgb))
         self.canvas.config(width=self.photo.width(), height=self.photo.height())
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-
+    # Confirms the annotation and saves the data.
     def confirm(self):
         self.is_confirmed = True
         self.annotation_data = {
@@ -277,7 +293,9 @@ class SideAnnotationWindow(Toplevel):
 # ==============================================================================
 #  Main Application Class
 # ==============================================================================
+# This class manages the main application window, image processing, and user interactions.
 class HumanInTheLoopProcessor:
+    # Initializes the main application with the root window and sets up the GUI.
     def __init__(self, root_window):
         # --- Application State Variables ---
         self.root = root_window
@@ -325,8 +343,10 @@ class HumanInTheLoopProcessor:
         else:
             self.root.destroy()
 
+    # Prompts the user to select input and output directories for image processing.
     def start_calibration_or_processing(self):
-        # This method remains unchanged
+
+        # Prompts the user to set a physical scale for measurements.
         if not self.image_paths: return
         if messagebox.askyesno("Set Scale", "Do you want to set a physical scale for your measurements?\n\n(If you choose 'No', all measurements will be in pixels.)"):
             calib_image = cv2.imread(self.image_paths[0])
@@ -346,7 +366,7 @@ class HumanInTheLoopProcessor:
         self.process_next_image()
 
     def setup_results_table(self):
-        # This method remains unchanged
+        # Initializes the results DataFrame with appropriate columns.
         columns = [
             'Session_ID', 'Image_Number', 'Filename', 'ROI_ID', 'Centroid_X_px', 'Centroid_Y_px',
             f'Area_({self.scale_unit}^2)', f'Perimeter_({self.scale_unit})', f'Equiv_Diameter_({self.scale_unit})',
@@ -354,9 +374,9 @@ class HumanInTheLoopProcessor:
             'Long_Axis_Length', 'Short_Axis_Length', 'Long_Axis_Texture', 'Short_Axis_Texture'
         ]
         self.results_df = pd.DataFrame(columns=columns)
-
+    
+    # Sets up the application menu with options for saving/loading settings and toggling the mask preview.
     def setup_menu(self):
-        # This method remains unchanged
         menubar = Menu(self.root)
         self.root.config(menu=menubar)
         file_menu = Menu(menubar, tearoff=0)
@@ -369,6 +389,7 @@ class HumanInTheLoopProcessor:
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_command(label="Toggle Live Mask Preview", command=self.toggle_mask_window)
 
+    # Shows a welcome message in the status bar.
     def setup_gui(self):
         status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
@@ -448,13 +469,13 @@ class HumanInTheLoopProcessor:
 
         # --- Final Actions ---
         action_frame = tk.LabelFrame(control_frame, text="Image Actions", padx=5, pady=5, font=ui_font); action_frame.pack(fill=tk.X, pady=5, side=tk.BOTTOM)
-        tk.Button(action_frame, text="Reset All Controls", command=self.reset_all_defaults).pack(fill=tk.X, pady=2)
+        tk.Button(action_frame, text="Reset HSV Controls", command=self.reset_hsv_defaults).pack(fill=tk.X, pady=2)
         tk.Button(action_frame, text="Accept & Next (Space)", command=self.handle_accept, bg="#4CAF50", fg="black", height=2).pack(fill=tk.X, pady=2)
         tk.Button(action_frame, text="Skip Image (S)", command=self.handle_skip, bg="#FF9800", fg="black", height=2).pack(fill=tk.X, pady=2)
-        self.reset_all_defaults()
+        self.reset_hsv_defaults()
 
+    # Creates the HSV bars for visualizing the color thresholds.
     def _create_hsv_bars(self):
-        # This creates the HSV bars for visualization
         hue_bar = np.zeros((1, 180, 3), dtype=np.uint8); hue_bar[0, :, 0] = np.arange(180); hue_bar[0, :, 1] = 255; hue_bar[0, :, 2] = 255
         self.hue_img = ImageTk.PhotoImage(image=Image.fromarray(cv2.resize(cv2.cvtColor(hue_bar, cv2.COLOR_HSV2RGB), (300, 20), interpolation=cv2.INTER_NEAREST)))
         self.hue_canvas.create_image(0, 0, anchor='nw', image=self.hue_img)
@@ -470,9 +491,9 @@ class HumanInTheLoopProcessor:
         self.sat_overlay2 = self.sat_canvas.create_rectangle(0,0,0,20, fill='white', stipple='gray50', outline="")
         self.val_overlay1 = self.val_canvas.create_rectangle(0,0,0,20, fill='white', stipple='gray50', outline="")
         self.val_overlay2 = self.val_canvas.create_rectangle(0,0,0,20, fill='white', stipple='gray50', outline="")
-
+        
+    # Updates the HSV overlay bars based on current slider values
     def _update_hsv_bars(self):
-        # This updates the HSV overlay bars based on current slider values
         w, h = 300, 20
         h_min_pos = self.h_min.get()/179*w; h_max_pos = self.h_max.get()/179*w
         self.hue_canvas.coords(self.hue_overlay1, 0,0, h_min_pos, h); self.hue_canvas.coords(self.hue_overlay2, h_max_pos, 0, w, h)
@@ -481,12 +502,13 @@ class HumanInTheLoopProcessor:
         v_min_pos = self.v_min.get()/255*w; v_max_pos = self.v_max.get()/255*w
         self.val_canvas.coords(self.val_overlay1, 0,0, v_min_pos, h); self.val_canvas.coords(self.val_overlay2, v_max_pos, 0, w, h)
 
-    def reset_all_defaults(self):
+    # Handles slider changes for contrast and HSV values, updating the image display.
+    def reset_hsv_defaults(self):
         self.contrast_value.set(1.0)
         self.h_min.set(2); self.h_max.set(91); self.s_min.set(43); self.s_max.set(164); self.v_min.set(48); self.v_max.set(196)
-        self.roi_expansion.set(0); self.min_area.set(50); self.max_area.set(200000); 
         self.on_slider_change(None)
 
+    # Runs the entire detection pipeline, including contrast adjustment, HSV thresholding, contour detection, and ROI post-processing.
     def run_detection_pipeline(self):
         if self.original_image is None: return
         
@@ -519,6 +541,7 @@ class HumanInTheLoopProcessor:
         self.deselect_roi()
         self.update_image_display()
 
+    # Handles slider changes for contrast and HSV values, updating the image display.
     def update_image_display(self):
         if self.processed_image is None: return
         # Display image is now always the contrast-adjusted one
@@ -545,7 +568,9 @@ class HumanInTheLoopProcessor:
             cv2.drawContours(preview_mask, self.final_rois, -1, 255, -1)
             self._update_tkinter_label(self.mask_label, preview_mask, is_bgr=False)
 
+    # Converts the OpenCV image to a format suitable for Tkinter display.
     def _update_tkinter_label(self, tk_label, cv_image, is_bgr=True):
+        
         if cv_image is None: return
         img_rgb = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB) if is_bgr else cv_image
         h, w = img_rgb.shape[:2]; label_w, label_h = tk_label.winfo_width(), tk_label.winfo_height()
@@ -559,13 +584,16 @@ class HumanInTheLoopProcessor:
             img_pil = Image.fromarray(resized_img); img_tk = ImageTk.PhotoImage(image=img_pil)
             tk_label.config(image=img_tk); tk_label.image = img_tk
 
+    # Sets up the columns for the live results table.
     def update_live_results_columns(self):
+        
         if self.results_tree is None: return
         cols = ('ID', f'Area ({self.scale_unit}²)', f'Perimeter ({self.scale_unit})', 'Aspect Ratio', 'Circularity')
         self.results_tree["columns"] = cols
         for col in cols: self.results_tree.heading(col, text=col); self.results_tree.column(col, width=120, anchor='center')
         self.results_tree.column('ID', width=40)
 
+    # Updates the live results table with measurements for each ROI.
     def update_live_results_table(self):
         if self.results_tree is None: return
         for row in self.results_tree.get_children(): self.results_tree.delete(row)
@@ -577,6 +605,7 @@ class HumanInTheLoopProcessor:
             item = self.results_tree.insert("", "end", values=values)
             if i == self.selected_roi_index: self.results_tree.selection_set(item)
 
+    # Handles the acceptance of the current image and saves measurements.
     def handle_accept(self, event=None):
         if not self.image_paths: return
         current_path = self.image_paths[self.current_image_index]; current_filename = os.path.basename(current_path)
@@ -619,6 +648,7 @@ class HumanInTheLoopProcessor:
         
         self.current_image_index += 1; self.process_next_image()
 
+    # Handles skipping the current image, copying it to the skipped directory if not corrupt.
     def handle_skip(self, event=None, is_corrupt=False):
         if not self.image_paths: return
         current_path = self.image_paths[self.current_image_index]
@@ -629,6 +659,7 @@ class HumanInTheLoopProcessor:
             except Exception as e: print(f"Could not copy skipped file: {e}")
         self.current_image_index += 1; self.process_next_image()
 
+    # Handles left-click events on the image label to select or draw ROIs.
     def handle_image_left_click(self, event):
         info = self.last_render_info; img_x = int((event.x-info['offset_x'])/info['scale']); img_y = int((event.y-info['offset_y'])/info['scale'])
         if self.drawing_mode:
@@ -644,22 +675,26 @@ class HumanInTheLoopProcessor:
         if clicked_roi_index != -1: self.select_roi(clicked_roi_index)
         else: self.deselect_roi()
 
+    # Enable/disable buttons based on whether an ROI is selected or not
     def update_roi_action_buttons(self):
         state = tk.NORMAL if self.selected_roi_index != -1 else tk.DISABLED
         self.delete_roi_btn.config(state=state); self.annotate_roi_btn.config(state=state)
         if self.selected_roi_index != -1:
-             self.status_label.config(text=f"ROI #{self.selected_roi_index + 1} selected. Use action buttons or click background to deselect.")
+            self.status_label.config(text=f"ROI #{self.selected_roi_index + 1} selected. Use action buttons or click background to deselect.")
         elif not self.drawing_mode:
-             self.status_label.config(text="Ready. Left-click to select an ROI or use ROI Tools.")
+            self.status_label.config(text="Ready. Left-click to select an ROI or use ROI Tools.")
 
+    # Deselect any currently selected ROI
     def select_roi(self, index):
         if not self.drawing_mode:
             self.selected_roi_index = index; self.update_roi_action_buttons(); self.update_image_display()
             print(f"Selected ROI #{index + 1}")
 
+    # Deselects the currently selected ROI and updates the display
     def deselect_roi(self):
         self.selected_roi_index = -1; self.update_roi_action_buttons(); self.update_image_display()
 
+    # Deletes the currently selected ROI and updates the display.
     def delete_selected_roi(self):
         if self.selected_roi_index != -1:
             index_to_delete = self.selected_roi_index
@@ -667,6 +702,8 @@ class HumanInTheLoopProcessor:
             if (index_to_delete + 1) in self.manual_annotations: del self.manual_annotations[index_to_delete + 1]
             self.deselect_roi()
 
+    # Opens a side annotation window for the selected ROI, allowing manual input of additional measurements.
+    # If the ROI already has annotations, it pre-fills the fields with existing data.
     def annotate_selected_roi(self):
         if self.selected_roi_index != -1:
             roi = self.final_rois[self.selected_roi_index]; roi_id = self.selected_roi_index + 1
@@ -680,6 +717,8 @@ class HumanInTheLoopProcessor:
                 self.manual_annotations[roi_id] = annot_window.annotation_data
                 messagebox.showinfo("Saved", f"Annotation for ROI {roi_id} saved.", parent=self.root)
 
+    # Enters drawing mode for manually adding new ROIs, allowing the user to click points on the image.
+    # The user can finish drawing or cancel the operation using the provided buttons.
     def enter_drawing_mode(self):
         self.drawing_mode = True; self.deselect_roi(); self.new_roi_points = []
         self.image_label.config(cursor="crosshair")
@@ -688,6 +727,8 @@ class HumanInTheLoopProcessor:
         self.finish_draw_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
         self.cancel_draw_btn.grid(row=0, column=1, sticky='ew', padx=(2,0))
 
+    # Cancels the drawing mode, resetting the state and clearing any drawn points.
+    # The user can return to the main interface and continue working with existing ROIs.
     def cancel_drawing(self, event=None):
         self.drawing_mode = False; self.new_roi_points = []
         self.image_label.config(cursor="")
@@ -696,15 +737,19 @@ class HumanInTheLoopProcessor:
         self.finish_draw_btn.config(state=tk.DISABLED)
         self.update_roi_action_buttons(); self.update_image_display()
 
+    # Finalizes the drawing of a new ROI by checking if enough (3) points were added.
+    # If valid, it adds the new ROI to the list and updates the display.
+    # If not enough points were added, it shows a warning message.
     def finalize_roi(self):
         if len(self.new_roi_points) >= 3:
             new_contour = np.array(self.new_roi_points, dtype=np.int32).reshape((-1, 1, 2))
             self.final_rois.append(new_contour)
             print(f"Manually added new ROI with {len(self.new_roi_points)} points.")
         else:
-             messagebox.showwarning("Drawing Error", "An ROI must have at least 3 points.", parent=self.root)
+            messagebox.showwarning("Drawing Error", "An ROI must have at least 3 points.", parent=self.root)
         self.cancel_drawing()
 
+    # Handles the closing of the main application window, prompting the user to confirm if they want to exit.
     def on_preview_zoom(self, event=None, reset=False):
         if reset: self.preview_zoom_factor = 1.0
         elif event:
@@ -712,6 +757,7 @@ class HumanInTheLoopProcessor:
             self.preview_zoom_factor = max(0.1, self.preview_zoom_factor * factor)
         self.update_image_display()
 
+    # Toggles the live mask preview window, creating it if it doesn't exist or closing it if it does.
     def toggle_mask_window(self):
         if self.mask_window and self.mask_window.winfo_exists():
             self.mask_window.destroy(); self.mask_window = None
@@ -720,6 +766,7 @@ class HumanInTheLoopProcessor:
             self.mask_label = tk.Label(self.mask_window, bg="gray"); self.mask_label.pack(expand=True, fill=tk.BOTH)
             self.update_image_display() # This will trigger the mask preview update
 
+    # Saves the current settings to a JSON file, allowing the user to create presets for future sessions.
     def save_settings(self):
         settings = {'contrast': self.contrast_value.get(), 'h_min': self.h_min.get(), 'h_max': self.h_max.get(), 's_min': self.s_min.get(), 's_max': self.s_max.get(), 'v_min': self.v_min.get(), 'v_max': self.v_max.get(), 'roi_expansion': self.roi_expansion.get(), 'min_area': self.min_area.get(), 'max_area': self.max_area.get()}
         filepath = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")], title="Save Settings Preset")
@@ -729,6 +776,7 @@ class HumanInTheLoopProcessor:
                 messagebox.showinfo("Success", f"Settings saved to {os.path.basename(filepath)}")
             except Exception as e: messagebox.showerror("Error", f"Failed to save settings file.\n\nError: {e}")
 
+    # Loads settings from a JSON file, allowing the user to apply previously saved presets.
     def load_settings(self):
         filepath = filedialog.askopenfilename(filetypes=[("JSON files", "*.json")], title="Load Settings Preset")
         if not filepath: return
@@ -741,9 +789,11 @@ class HumanInTheLoopProcessor:
             messagebox.showinfo("Success", "Settings loaded and applied.")
         except Exception as e: messagebox.showerror("Error", f"Failed to load settings file.\n\nError: {e}")
 
+    #  Displays a welcome message with instructions for using the application.
     def show_welcome_message(self):
         messagebox.showinfo("Welcome!", "Welcome to SALP v2.3!\n\n- Select input and output folders.\n- Use the controls to adjust detection.\n- Left-click an ROI to select it, then use the action buttons.\n- Use the 'Draw New ROI' button to manually add objects.")
 
+    # Prompts the user to select input and output directories, initializes the session, and loads the image list.
     def prompt_for_directories(self):
         self.input_dir = filedialog.askdirectory(title="Select Input Image Folder")
         if not self.input_dir: return False
@@ -756,6 +806,7 @@ class HumanInTheLoopProcessor:
         self.setup_output_structure(); self.load_image_list()
         return self.total_images > 0
 
+    # Initializes the output directory structure for the current session, creating necessary subdirectories.
     def setup_output_structure(self):
         base_path = os.path.join(self.output_dir, f"session_{self.session_id}")
         dir_names = ["filled_masks", "image_with_roi", "temp_measurements", "completed_measurements", "skipped"]
@@ -764,12 +815,14 @@ class HumanInTheLoopProcessor:
             self.output_subdirs[name] = path
         print(f"Session '{self.session_id}' started. Output will be saved in: {base_path}")
 
+    # Loads the list of images from the input directory, filtering by valid image file extensions.
     def load_image_list(self):
         valid_extensions = ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp')
         self.image_paths = sorted([os.path.join(self.input_dir, f) for f in os.listdir(self.input_dir) if f.lower().endswith(valid_extensions)])
         self.total_images = len(self.image_paths)
         if self.total_images == 0: messagebox.showerror("Error", "No valid images found in the selected directory.")
 
+    # Processes the next image in the list, resetting the state and updating the display.
     def process_next_image(self):
         if self.current_image_index >= self.total_images: self.finalize_session(); return
         self.manual_annotations.clear(); self.cancel_drawing(); self.deselect_roi(); self.preview_zoom_factor = 1.0
@@ -779,16 +832,19 @@ class HumanInTheLoopProcessor:
         if self.original_image is None:
             messagebox.showwarning("File Error", f"Could not read image file:\n{os.path.basename(image_path)}\nIt will be skipped.")
             self.handle_skip(is_corrupt=True); return
-        self.reset_all_defaults() # Resets sliders for each new image
+        self.reset_hsv_defaults() # Resets sliders for each new image
 
+    # Updates the HSV bars and runs the detection pipeline when sliders are changed.
     def on_slider_change(self, _):
         self._update_hsv_bars()
         if not self.drawing_mode: self.run_detection_pipeline()
         
+    # Handles the closing of the main application window, prompting the user to confirm if they want to exit.
     def on_closing(self):
         if messagebox.askokcancel("Quit", "Do you want to exit? Your progress will be saved."):
             self.finalize_session(is_manual_exit=True)
 
+    # Finalizes the session by saving results, generating a summary, and cleaning up temporary files.
     def finalize_session(self, is_manual_exit=False):
         if self.results_df is None or not self.output_subdirs or self.results_df.empty:
             if not is_manual_exit: messagebox.showinfo("Session End", "Session closed. No measurements were saved.")
