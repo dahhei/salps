@@ -1,10 +1,10 @@
 # Welcome to the Segmentation Analysis Labeling Program! (SALP)
 # This script is designed to help you analyze and label images with advanced object detection capabilities.
 #
-# --- VERSION 2.3 UPGRADES ---
-# 1. Accurate Binary Mask Saving: The saved binary mask now perfectly matches the final filtered and edited ROIs.
-# 2. Contrast Control: A new "Contrast" slider allows for pre-processing the image to enhance object visibility.
-# 3. UI Layout Adjustments: The control panel has been refined to comfortably fit all controls.
+# --- VERSION 2.4 UPGRADES (from v2.3) ---
+# 1. Color Picker Tool: A new eyedropper tool to automatically set HSV thresholds by clicking on the image.
+# 2. UI for Color Picker: New buttons to start, undo, and finish color selection.
+# 3. State Management: The app now cleanly handles mutually exclusive modes (e.g., Drawing vs. Color Picking).
 
 # ==============================================================================
 #  IMPORTS
@@ -307,7 +307,9 @@ class HumanInTheLoopProcessor:
             print(f"Icon not found (app_icon.ico), skipping: {e}")
         self.root.geometry("1450x950") # Increased width for new controls
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.input_dir, self.output_dir = "", ""
+        self.input_dir, self.output        
+        
+        dir = "", self.output_dir = "", ""
         self.image_paths, self.output_subdirs = [], {}
         self.current_image_index, self.total_images = 0, 0
         self.results_df = None
@@ -323,11 +325,17 @@ class HumanInTheLoopProcessor:
         self.new_roi_points = []
         self.contrast_value = None # For contrast slider
 
+        ### NEW FEATURE: Color Picker State Variables
+        self.color_picker_active = False
+        self.color_picker_history = [] # To store slider states for the undo function
+
         # --- GUI Element Variables ---
         self.mask_window, self.mask_label, self.results_tree, self.image_label = None, None, None, None
         self.delete_roi_btn, self.annotate_roi_btn = None, None
         self.draw_roi_btn, self.finish_draw_btn, self.cancel_draw_btn = None, None, None
         self.status_label = None
+        ### NEW FEATURE: Color Picker Buttons
+        self.start_color_pick_btn, self.undo_color_pick_btn, self.finish_color_pick_btn = None, None, None
         
         # --- Application Startup Sequence ---
         self.setup_menu()
@@ -449,6 +457,17 @@ class HumanInTheLoopProcessor:
         self.roi_expansion = Scale(adj_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="Expand/Shrink (px)", command=self.on_slider_change); self.roi_expansion.pack(fill=tk.X)
         self.min_area = Scale(adj_frame, from_=0, to=50000, orient=tk.HORIZONTAL, label="Min Area (px²)", command=self.on_slider_change); self.min_area.pack(fill=tk.X)
         self.max_area = Scale(adj_frame, from_=0, to=500000, orient=tk.HORIZONTAL, label="Max Area (px²)", command=self.on_slider_change); self.max_area.pack(fill=tk.X)
+
+        ### NEW FEATURE: Color Picker Tools
+        picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font)
+        picker_tools_frame.pack(fill=tk.X, pady=5)
+        picker_grid = tk.Frame(picker_tools_frame)
+        picker_grid.pack(fill=tk.X)
+        self.start_color_pick_btn = tk.Button(picker_grid, text="Start Color Picking", command=self.enter_color_picker_mode)
+        self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Last Pick", command=self.undo_last_color_pick)
+        self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Picking", command=self.exit_color_picker_mode)
+        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
+        picker_grid.columnconfigure(0, weight=1); picker_grid.columnconfigure(1, weight=1)
 
         # --- Tool Buttons ---
         roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font); roi_tools_frame.pack(fill=tk.X, pady=5)
@@ -662,12 +681,19 @@ class HumanInTheLoopProcessor:
     # Handles left-click events on the image label to select or draw ROIs.
     def handle_image_left_click(self, event):
         info = self.last_render_info; img_x = int((event.x-info['offset_x'])/info['scale']); img_y = int((event.y-info['offset_y'])/info['scale'])
+        
+        ### NEW FEATURE: Divert click to color picker if active
+        if self.color_picker_active:
+            self.handle_color_pick(img_x, img_y)
+            return
+            
         if self.drawing_mode:
             self.new_roi_points.append((img_x, img_y))
             if len(self.new_roi_points) >= 3:
                 self.finish_draw_btn.config(state=tk.NORMAL)
             self.update_image_display()
             return
+            
         clicked_roi_index = -1
         for i in range(len(self.final_rois) - 1, -1, -1):
             if cv2.pointPolygonTest(self.final_rois[i], (img_x, img_y), False) >= 0:
@@ -681,12 +707,12 @@ class HumanInTheLoopProcessor:
         self.delete_roi_btn.config(state=state); self.annotate_roi_btn.config(state=state)
         if self.selected_roi_index != -1:
             self.status_label.config(text=f"ROI #{self.selected_roi_index + 1} selected. Use action buttons or click background to deselect.")
-        elif not self.drawing_mode:
-            self.status_label.config(text="Ready. Left-click to select an ROI or use ROI Tools.")
+        elif not self.drawing_mode and not self.color_picker_active:
+            self.status_label.config(text="Ready. Left-click to select an ROI or use tools.")
 
     # Deselect any currently selected ROI
     def select_roi(self, index):
-        if not self.drawing_mode:
+        if not self.drawing_mode and not self.color_picker_active:
             self.selected_roi_index = index; self.update_roi_action_buttons(); self.update_image_display()
             print(f"Selected ROI #{index + 1}")
 
@@ -703,7 +729,6 @@ class HumanInTheLoopProcessor:
             self.deselect_roi()
 
     # Opens a side annotation window for the selected ROI, allowing manual input of additional measurements.
-    # If the ROI already has annotations, it pre-fills the fields with existing data.
     def annotate_selected_roi(self):
         if self.selected_roi_index != -1:
             roi = self.final_rois[self.selected_roi_index]; roi_id = self.selected_roi_index + 1
@@ -717,9 +742,9 @@ class HumanInTheLoopProcessor:
                 self.manual_annotations[roi_id] = annot_window.annotation_data
                 messagebox.showinfo("Saved", f"Annotation for ROI {roi_id} saved.", parent=self.root)
 
-    # Enters drawing mode for manually adding new ROIs, allowing the user to click points on the image.
-    # The user can finish drawing or cancel the operation using the provided buttons.
+    # Enters drawing mode for manually adding new ROIs
     def enter_drawing_mode(self):
+        self.exit_color_picker_mode() # Ensure color picker is off
         self.drawing_mode = True; self.deselect_roi(); self.new_roi_points = []
         self.image_label.config(cursor="crosshair")
         self.status_label.config(text="DRAWING MODE: Left-click to add points. Use buttons to Finish or Cancel.")
@@ -727,8 +752,7 @@ class HumanInTheLoopProcessor:
         self.finish_draw_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
         self.cancel_draw_btn.grid(row=0, column=1, sticky='ew', padx=(2,0))
 
-    # Cancels the drawing mode, resetting the state and clearing any drawn points.
-    # The user can return to the main interface and continue working with existing ROIs.
+    # Cancels the drawing mode
     def cancel_drawing(self, event=None):
         self.drawing_mode = False; self.new_roi_points = []
         self.image_label.config(cursor="")
@@ -737,9 +761,7 @@ class HumanInTheLoopProcessor:
         self.finish_draw_btn.config(state=tk.DISABLED)
         self.update_roi_action_buttons(); self.update_image_display()
 
-    # Finalizes the drawing of a new ROI by checking if enough (3) points were added.
-    # If valid, it adds the new ROI to the list and updates the display.
-    # If not enough points were added, it shows a warning message.
+    # Finalizes the drawing of a new ROI
     def finalize_roi(self):
         if len(self.new_roi_points) >= 3:
             new_contour = np.array(self.new_roi_points, dtype=np.int32).reshape((-1, 1, 2))
@@ -748,6 +770,63 @@ class HumanInTheLoopProcessor:
         else:
             messagebox.showwarning("Drawing Error", "An ROI must have at least 3 points.", parent=self.root)
         self.cancel_drawing()
+
+    ### NEW FEATURE: Color Picker Methods
+    def enter_color_picker_mode(self):
+        self.cancel_drawing() # Ensure drawing mode is off
+        self.color_picker_active = True
+        self.color_picker_history = []
+        self.image_label.config(cursor="tcross")
+        self.status_label.config(text="COLOR PICKER MODE: Click on the image to select a color range. Click multiple times to expand.")
+        self.start_color_pick_btn.grid_remove()
+        self.undo_color_pick_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
+        self.finish_color_pick_btn.grid(row=0, column=1, sticky='ew', padx=(2,0))
+        self.undo_color_pick_btn.config(state=tk.DISABLED)
+
+    def exit_color_picker_mode(self):
+        self.color_picker_active = False
+        self.image_label.config(cursor="")
+        self.undo_color_pick_btn.grid_remove()
+        self.finish_color_pick_btn.grid_remove()
+        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
+        self.update_roi_action_buttons()
+
+    def handle_color_pick(self, img_x, img_y):
+        if not (0 <= img_y < self.original_image.shape[0] and 0 <= img_x < self.original_image.shape[1]):
+            return # Click was outside the image bounds
+        
+        # Save current state for undo
+        current_state = (self.h_min.get(), self.h_max.get(), self.s_min.get(), self.s_max.get(), self.v_min.get(), self.v_max.get())
+        self.color_picker_history.append(current_state)
+        self.undo_color_pick_btn.config(state=tk.NORMAL)
+        
+        # Get color and convert to HSV
+        bgr_color = self.original_image[img_y, img_x]
+        hsv_color = cv2.cvtColor(np.uint8([[bgr_color]]), cv2.COLOR_BGR2HSV)[0][0]
+        h, s, v = hsv_color[0], hsv_color[1], hsv_color[2]
+        
+        # Set ranges based on pick
+        H_TOL, SV_TOL = 5, 25 # Tolerances for Hue and Sat/Val
+        if len(self.color_picker_history) == 1: # First pick
+            self.h_min.set(max(0, h - H_TOL)); self.h_max.set(min(179, h + H_TOL))
+            self.s_min.set(max(0, s - SV_TOL)); self.s_max.set(min(255, s + SV_TOL))
+            self.v_min.set(max(0, v - SV_TOL)); self.v_max.set(min(255, v + SV_TOL))
+        else: # Subsequent picks
+            self.h_min.set(min(self.h_min.get(), h)); self.h_max.set(max(self.h_max.get(), h))
+            self.s_min.set(min(self.s_min.get(), s)); self.s_max.set(max(self.s_max.get(), s))
+            self.v_min.set(min(self.v_min.get(), v)); self.v_max.set(max(self.v_max.get(), v))
+
+        self.on_slider_change(None) # Update the display with new values
+
+    def undo_last_color_pick(self):
+        if self.color_picker_history:
+            last_state = self.color_picker_history.pop()
+            self.h_min.set(last_state[0]); self.h_max.set(last_state[1])
+            self.s_min.set(last_state[2]); self.s_max.set(last_state[3])
+            self.v_min.set(last_state[4]); self.v_max.set(last_state[5])
+            self.on_slider_change(None)
+        if not self.color_picker_history:
+            self.undo_color_pick_btn.config(state=tk.DISABLED)
 
     # Handles the closing of the main application window, prompting the user to confirm if they want to exit.
     def on_preview_zoom(self, event=None, reset=False):
@@ -791,7 +870,7 @@ class HumanInTheLoopProcessor:
 
     #  Displays a welcome message with instructions for using the application.
     def show_welcome_message(self):
-        messagebox.showinfo("Welcome!", "Welcome to SALP v2.3!\n\n- Select input and output folders.\n- Use the controls to adjust detection.\n- Left-click an ROI to select it, then use the action buttons.\n- Use the 'Draw New ROI' button to manually add objects.")
+        messagebox.showinfo("Welcome!", "Welcome to SALP v2.4!\n\n- Use the new 'Color Picker Tool' to quickly set HSV values.\n- Select input and output folders.\n- Use the controls to adjust detection.\n- Left-click an ROI to select it, then use the action buttons.")
 
     # Prompts the user to select input and output directories, initializes the session, and loads the image list.
     def prompt_for_directories(self):
@@ -825,7 +904,7 @@ class HumanInTheLoopProcessor:
     # Processes the next image in the list, resetting the state and updating the display.
     def process_next_image(self):
         if self.current_image_index >= self.total_images: self.finalize_session(); return
-        self.manual_annotations.clear(); self.cancel_drawing(); self.deselect_roi(); self.preview_zoom_factor = 1.0
+        self.manual_annotations.clear(); self.cancel_drawing(); self.exit_color_picker_mode(); self.deselect_roi(); self.preview_zoom_factor = 1.0
         self.progress_label.config(text=f"Image {self.current_image_index + 1} of {self.total_images}")
         image_path = self.image_paths[self.current_image_index]
         self.original_image = cv2.imread(image_path)
