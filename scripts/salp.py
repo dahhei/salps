@@ -307,9 +307,7 @@ class HumanInTheLoopProcessor:
             print(f"Icon not found (app_icon.ico), skipping: {e}")
         self.root.geometry("1450x950") # Increased width for new controls
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.input_dir, self.output        
-        
-        dir = "", self.output_dir = "", ""
+        self.input_dir, self.output_dir = "", ""
         self.image_paths, self.output_subdirs = [], {}
         self.current_image_index, self.total_images = 0, 0
         self.results_df = None
@@ -398,6 +396,7 @@ class HumanInTheLoopProcessor:
         view_menu.add_command(label="Toggle Live Mask Preview", command=self.toggle_mask_window)
 
     # Shows a welcome message in the status bar.
+        # Shows a welcome message in the status bar.
     def setup_gui(self):
         status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
@@ -405,8 +404,49 @@ class HumanInTheLoopProcessor:
         self.status_label.pack(fill=tk.X)
         main_pane = PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
         main_pane.pack(fill=tk.BOTH, expand=True)
-        control_frame = tk.Frame(main_pane, padx=10, pady=10)
-        main_pane.add(control_frame, width=400) # Slightly wider for comfort
+
+        ### UI SCROLLBAR FEATURE: Create a scrollable container for the control panel ###
+        # This outer frame holds both the canvas and the scrollbar
+        outer_control_frame = tk.Frame(main_pane, bd=2, relief=tk.SUNKEN)
+        main_pane.add(outer_control_frame, width=420) # A bit wider for the scrollbar
+
+        # Create a canvas and a scrollbar
+        canvas_controls = tk.Canvas(outer_control_frame, highlightthickness=0)
+        scrollbar_controls = ttk.Scrollbar(outer_control_frame, orient="vertical", command=canvas_controls.yview)
+        canvas_controls.configure(yscrollcommand=scrollbar_controls.set)
+
+        # This is the actual frame that will contain all the widgets
+        control_frame = tk.Frame(canvas_controls, padx=10, pady=10)
+        
+        # Add the content frame to the canvas
+        canvas_controls.create_window((0, 0), window=control_frame, anchor="nw")
+
+        # Update the scroll region when the content frame size changes
+        def on_frame_configure(event):
+            canvas_controls.configure(scrollregion=canvas_controls.bbox("all"))
+
+        control_frame.bind("<Configure>", on_frame_configure)
+        
+        # Pack the canvas and scrollbar into the outer frame
+        scrollbar_controls.pack(side="right", fill="y")
+        canvas_controls.pack(side="left", fill="both", expand=True)
+        
+        # Enable mouse wheel scrolling on the canvas (cross-platform)
+        def on_mouse_wheel(event):
+            if event.num == 5 or event.delta < 0:
+                canvas_controls.yview_scroll(1, "units")
+            elif event.num == 4 or event.delta > 0:
+                canvas_controls.yview_scroll(-1, "units")
+        
+        # Bind the mouse wheel event to the canvas and the frame inside it
+        for widget in [canvas_controls, control_frame]:
+            widget.bind("<MouseWheel>", on_mouse_wheel)
+            widget.bind("<Button-4>", on_mouse_wheel) # For Linux scroll up
+            widget.bind("<Button-5>", on_mouse_wheel) # For Linux scroll down
+        ### END UI SCROLLBAR FEATURE ###
+
+        # -- The rest of the setup is the same, but widgets are packed into 'control_frame' --
+
         right_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
         main_pane.add(right_pane)
         image_frame = tk.Frame(right_pane, bg="gray")
@@ -458,7 +498,7 @@ class HumanInTheLoopProcessor:
         self.min_area = Scale(adj_frame, from_=0, to=50000, orient=tk.HORIZONTAL, label="Min Area (px²)", command=self.on_slider_change); self.min_area.pack(fill=tk.X)
         self.max_area = Scale(adj_frame, from_=0, to=500000, orient=tk.HORIZONTAL, label="Max Area (px²)", command=self.on_slider_change); self.max_area.pack(fill=tk.X)
 
-        ### NEW FEATURE: Color Picker Tools
+        # --- Color Picker Tools ---
         picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font)
         picker_tools_frame.pack(fill=tk.X, pady=5)
         picker_grid = tk.Frame(picker_tools_frame)
@@ -863,7 +903,7 @@ class HumanInTheLoopProcessor:
             with open(filepath, 'r') as f: settings = json.load(f)
             self.contrast_value.set(settings.get('contrast', 1.0))
             self.h_min.set(settings.get('h_min',0)); self.h_max.set(settings.get('h_max',179)); self.s_min.set(settings.get('s_min',0)); self.s_max.set(settings.get('s_max',255)); self.v_min.set(settings.get('v_min',0)); self.v_max.set(settings.get('v_max',255))
-            self.roi_expansion.set(settings.get('roi_expansion',0)); self.min_area.set(settings.get('min_area',0)); self.max_area.set(settings.get('max_area',500000))
+            self.roi_expansion.set(settings.get('roi_expansion',0)); self.min_area.set(settings.get('min_area',1000)); self.max_area.set(settings.get('max_area',40000))
             self.on_slider_change(None)
             messagebox.showinfo("Success", "Settings loaded and applied.")
         except Exception as e: messagebox.showerror("Error", f"Failed to load settings file.\n\nError: {e}")
