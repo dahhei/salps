@@ -373,9 +373,10 @@ class HumanInTheLoopProcessor:
 
     def setup_results_table(self):
         # Initializes the results DataFrame with appropriate columns.
+        ### RECALIBRATE FEATURE: Refactored column names for robustness ###
         columns = [
-            'Session_ID', 'Image_Number', 'Filename', 'ROI_ID', 'Centroid_X_px', 'Centroid_Y_px',
-            f'Area_({self.scale_unit}^2)', f'Perimeter_({self.scale_unit})', f'Equiv_Diameter_({self.scale_unit})',
+            'Session_ID', 'Image_Number', 'Filename', 'ROI_ID', 'Measurement_Unit',
+            'Centroid_X_px', 'Centroid_Y_px', 'Area', 'Perimeter', 'Equivalent_Diameter',
             'Aspect_Ratio', 'Circularity_Ratio', 'Solidity_Ratio', 'Orientation_Angle',
             'Long_Axis_Length', 'Short_Axis_Length', 'Long_Axis_Texture', 'Short_Axis_Texture'
         ]
@@ -387,6 +388,11 @@ class HumanInTheLoopProcessor:
         self.root.config(menu=menubar)
         file_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
+        
+        ### RECALIBRATE FEATURE: Add menu item ###
+        file_menu.add_command(label="Recalibrate Scale...", command=self.recalibrate_scale)
+        file_menu.add_separator()
+        
         file_menu.add_command(label="Save Settings...", command=self.save_settings)
         file_menu.add_command(label="Load Settings...", command=self.load_settings)
         file_menu.add_separator()
@@ -564,7 +570,14 @@ class HumanInTheLoopProcessor:
     # Handles slider changes for contrast and HSV values, updating the image display.
     def reset_hsv_defaults(self):
         self.contrast_value.set(1.0)
-        self.h_min.set(2); self.h_max.set(91); self.s_min.set(43); self.s_max.set(164); self.v_min.set(48); self.v_max.set(196)
+        self.h_min.set(2)
+        self.h_max.set(91)
+        self.s_min.set(43)
+        self.s_max.set(164)
+        self.v_min.set(48)
+        self.v_max.set(196)
+        self.min_area.set(1500)
+        self.max_area.set(50000)   # Set your desired default maximum area here
         self.on_slider_change(None)
 
     # Runs the entire detection pipeline, including contrast adjustment, HSV thresholding, contour detection, and ROI post-processing.
@@ -665,6 +678,7 @@ class HumanInTheLoopProcessor:
             if i == self.selected_roi_index: self.results_tree.selection_set(item)
 
     # Handles the acceptance of the current image and saves measurements.
+        # Handles the acceptance of the current image and saves measurements.
     def handle_accept(self, event=None):
         if not self.image_paths: return
         current_path = self.image_paths[self.current_image_index]; current_filename = os.path.basename(current_path)
@@ -676,28 +690,35 @@ class HumanInTheLoopProcessor:
             solidity=float(pixel_area)/hull_area if hull_area!=0 else 0
             circularity=(4*math.pi*pixel_area)/(pixel_perimeter**2) if pixel_perimeter!=0 else 0
             orientation=cv2.fitEllipse(roi)[-1] if len(roi)>=5 else np.nan
-            scaled_area=pixel_area/(self.scale_factor**2); scaled_perimeter=pixel_perimeter/self.scale_factor
+            
+            ### RECALIBRATE FEATURE: Use current scale factor for calculations ###
+            scaled_area=pixel_area/(self.scale_factor**2)
+            scaled_perimeter=pixel_perimeter/self.scale_factor
             scaled_equiv_diameter=(np.sqrt(4*pixel_area/np.pi))/self.scale_factor
+            
             roi_id = i + 1; annotation = self.manual_annotations.get(roi_id, {})
+            
+            ### RECALIBRATE FEATURE: Use generic column names for appending data ###
             image_results.append({
-                'Session_ID': self.session_id, 'Image_Number': self.current_image_index + 1, 'Filename': current_filename, 'ROI_ID': roi_id,
-                'Centroid_X_px': cx, 'Centroid_Y_px': cy, f'Area_({self.scale_unit}^2)': scaled_area, f'Perimeter_({self.scale_unit})': scaled_perimeter,
-                f'Equiv_Diameter_({self.scale_unit})': scaled_equiv_diameter, 'Aspect_Ratio': aspect_ratio, 'Circularity_Ratio': circularity, 'Solidity_Ratio': solidity,
-                'Orientation_Angle': orientation, 'Long_Axis_Length': annotation.get('Long_Axis_Length', ''), 'Short_Axis_Length': annotation.get('Short_Axis_Length', ''),
+                'Session_ID': self.session_id, 'Image_Number': self.current_image_index + 1, 'Filename': current_filename, 
+                'ROI_ID': roi_id, 'Measurement_Unit': self.scale_unit,
+                'Centroid_X_px': cx, 'Centroid_Y_px': cy, 'Area': scaled_area, 'Perimeter': scaled_perimeter,
+                'Equivalent_Diameter': scaled_equiv_diameter, 'Aspect_Ratio': aspect_ratio, 
+                'Circularity_Ratio': circularity, 'Solidity_Ratio': solidity, 'Orientation_Angle': orientation, 
+                'Long_Axis_Length': annotation.get('Long_Axis_Length', ''), 'Short_Axis_Length': annotation.get('Short_Axis_Length', ''),
                 'Long_Axis_Texture': annotation.get('Long_Axis_Texture', ''), 'Short_Axis_Texture': annotation.get('Short_Axis_Texture', '')
             })
+            
         if image_results: self.results_df = pd.concat([self.results_df, pd.DataFrame(image_results)], ignore_index=True)
         temp_csv_path = os.path.join(self.output_subdirs['temp_measurements'], f"temp_results_{self.session_id}.csv")
         self.results_df.to_csv(temp_csv_path, index=False, float_format='%.4f')
         base_name = os.path.splitext(current_filename)[0]
         
-        # --- KEY FIX: Generate final mask and ROI image from the final ROI list ---
-        # 1. Create the final binary mask for saving
+        # Create the final binary mask and ROI image for saving
         final_mask = np.zeros(self.original_image.shape[:2], dtype=np.uint8)
         if self.final_rois:
             cv2.drawContours(final_mask, self.final_rois, -1, 255, -1)
         
-        # 2. Create the final ROI image for saving (on the original image, not the contrast-adjusted one)
         final_roi_image = self.original_image.copy()
         if self.final_rois:
             cv2.drawContours(final_roi_image, self.final_rois, -1, (0, 255, 0), 2)
@@ -858,6 +879,38 @@ class HumanInTheLoopProcessor:
 
         self.on_slider_change(None) # Update the display with new values
 
+        ### NEW FEATURE: On-Demand Scale Recalibration ###
+    def recalibrate_scale(self):
+        if self.original_image is None:
+            messagebox.showerror("Error", "Please load an image before calibrating the scale.", parent=self.root)
+            return
+
+        # Warn the user about changing the scale mid-session
+        msg = "You are about to change the measurement scale.\n\n" \
+              "All measurements from this point forward will use the new scale. " \
+              "Previously saved data in this session will NOT be changed.\n\n" \
+              "Do you want to continue?"
+        if not messagebox.askokcancel("Scale Recalibration Warning", msg, parent=self.root):
+            return
+
+        # Open the calibration window with the current image
+        calib_image = self.original_image.copy() # Use a copy to be safe
+        calib_window = ScaleCalibrationWindow(self.root, calib_image)
+        self.root.wait_window(calib_window)
+
+        if calib_window.is_confirmed:
+            self.scale_factor = calib_window.scale_factor
+            self.scale_unit = calib_window.scale_unit
+            
+            # Update the UI to reflect the new scale
+            self.update_live_results_columns()
+            self.update_live_results_table()
+            
+            messagebox.showinfo("Scale Updated", f"Scale has been updated.\nNew scale: 1 {self.scale_unit} = {self.scale_factor:.4f} pixels.", parent=self.root)
+        else:
+            messagebox.showwarning("Calibration Canceled", "The scale was not changed.", parent=self.root)
+
+    # Undoes the last color pick, restoring the previous HSV values.    
     def undo_last_color_pick(self):
         if self.color_picker_history:
             last_state = self.color_picker_history.pop()
