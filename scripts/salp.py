@@ -329,6 +329,10 @@ class HumanInTheLoopProcessor:
 
         # --- GUI Element Variables ---
         self.mask_window, self.mask_label, self.results_tree, self.image_label = None, None, None, None
+                ### FILE BROWSER FEATURE: GUI and State Variables ###
+        self.file_browser_frame = None
+        self.file_browser_tree = None
+        self.left_pane = None
         self.delete_roi_btn, self.annotate_roi_btn = None, None
         self.draw_roi_btn, self.finish_draw_btn, self.cancel_draw_btn = None, None, None
         self.status_label = None
@@ -388,11 +392,8 @@ class HumanInTheLoopProcessor:
         self.root.config(menu=menubar)
         file_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="File", menu=file_menu)
-        
-        ### RECALIBRATE FEATURE: Add menu item ###
         file_menu.add_command(label="Recalibrate Scale...", command=self.recalibrate_scale)
         file_menu.add_separator()
-        
         file_menu.add_command(label="Save Settings...", command=self.save_settings)
         file_menu.add_command(label="Load Settings...", command=self.load_settings)
         file_menu.add_separator()
@@ -400,90 +401,95 @@ class HumanInTheLoopProcessor:
         view_menu = Menu(menubar, tearoff=0)
         menubar.add_cascade(label="View", menu=view_menu)
         view_menu.add_command(label="Toggle Live Mask Preview", command=self.toggle_mask_window)
+        ### FILE BROWSER FEATURE: Add toggle menu item ###
+        view_menu.add_separator()
+        view_menu.add_command(label="Show/Hide File Browser", command=self.toggle_file_browser)
 
     # Shows a welcome message in the status bar.
         # Shows a welcome message in the status bar.
     def setup_gui(self):
+        """Sets up the main GUI by creating the primary window layout and thendelegating the creation of specific components to helper methods."""
+        # --- Main Window Structure ---
         status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        self.status_label = tk.Label(status_frame, text="Ready. Left-click to select an ROI.", anchor='w', padx=5, pady=3)
+        self.status_label = tk.Label(status_frame, text="Ready.", anchor='w', padx=5, pady=3)
         self.status_label.pack(fill=tk.X)
+
         main_pane = PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
         main_pane.pack(fill=tk.BOTH, expand=True)
 
-        ### UI SCROLLBAR FEATURE: Create a scrollable container for the control panel ###
-        # This outer frame holds both the canvas and the scrollbar
-        outer_control_frame = tk.Frame(main_pane, bd=2, relief=tk.SUNKEN)
-        main_pane.add(outer_control_frame, width=420) # A bit wider for the scrollbar
+        # --- Left Pane (for File Browser and Controls) ---
+        self.left_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
+        main_pane.add(self.left_pane, width=420)
 
-        # Create a canvas and a scrollbar
-        canvas_controls = tk.Canvas(outer_control_frame, highlightthickness=0)
-        scrollbar_controls = ttk.Scrollbar(outer_control_frame, orient="vertical", command=canvas_controls.yview)
-        canvas_controls.configure(yscrollcommand=scrollbar_controls.set)
-
-        # This is the actual frame that will contain all the widgets
-        control_frame = tk.Frame(canvas_controls, padx=10, pady=10)
-        
-        # Add the content frame to the canvas
-        canvas_controls.create_window((0, 0), window=control_frame, anchor="nw")
-
-        # Update the scroll region when the content frame size changes
-        def on_frame_configure(event):
-            canvas_controls.configure(scrollregion=canvas_controls.bbox("all"))
-
-        control_frame.bind("<Configure>", on_frame_configure)
-        
-        # Pack the canvas and scrollbar into the outer frame
-        scrollbar_controls.pack(side="right", fill="y")
-        canvas_controls.pack(side="left", fill="both", expand=True)
-        
-        # Enable mouse wheel scrolling on the canvas (cross-platform)
-        def on_mouse_wheel(event):
-            if event.num == 5 or event.delta < 0:
-                canvas_controls.yview_scroll(1, "units")
-            elif event.num == 4 or event.delta > 0:
-                canvas_controls.yview_scroll(-1, "units")
-        
-        # Bind the mouse wheel event to the canvas and the frame inside it
-        for widget in [canvas_controls, control_frame]:
-            widget.bind("<MouseWheel>", on_mouse_wheel)
-            widget.bind("<Button-4>", on_mouse_wheel) # For Linux scroll up
-            widget.bind("<Button-5>", on_mouse_wheel) # For Linux scroll down
-        ### END UI SCROLLBAR FEATURE ###
-
-        # -- The rest of the setup is the same, but widgets are packed into 'control_frame' --
-
+        # --- Right Pane (for Viewer and Results) ---
         right_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
         main_pane.add(right_pane)
-        image_frame = tk.Frame(right_pane, bg="gray")
-        right_pane.add(image_frame, height=650)
-        self.image_label = tk.Label(image_frame, bg="gray")
-        self.image_label.pack(expand=True, fill=tk.BOTH)
-        self.image_label.bind("<MouseWheel>", self.on_preview_zoom)
-        self.image_label.bind("<Button-1>", self.handle_image_left_click)
-        results_frame = tk.LabelFrame(right_pane, text="Live ROI Measurements", padx=5, pady=5)
-        right_pane.add(results_frame, height=250)
-        self.results_tree = ttk.Treeview(results_frame, show='headings')
-        vsb = ttk.Scrollbar(results_frame, orient="vertical", command=self.results_tree.yview)
-        hsb = ttk.Scrollbar(results_frame, orient="horizontal", command=self.results_tree.xview)
-        self.results_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
-        vsb.pack(side='right', fill='y'); hsb.pack(side='bottom', fill='x')
-        self.results_tree.pack(fill='both', expand=True)
+
+        # --- Populate Panes using Helper Methods ---
+        self._setup_file_browser(parent=self.left_pane)
+        self._setup_control_panel(parent=self.left_pane)
+        self._setup_viewer_and_results(parent=right_pane)
+        
+        # Initialize default settings after GUI is built
+        self.reset_hsv_defaults()
+
+    def _setup_file_browser(self, parent):
+        """Creates the file browser treeview and its containing frame."""
+        self.file_browser_frame = tk.LabelFrame(parent, text="Image Queue", padx=5, pady=5)
+        parent.add(self.file_browser_frame, height=250)
+
+        self.file_browser_tree = ttk.Treeview(self.file_browser_frame, show="tree", selectmode="browse")
+        fb_vsb = ttk.Scrollbar(self.file_browser_frame, orient="vertical", command=self.file_browser_tree.yview)
+        self.file_browser_tree.configure(yscrollcommand=fb_vsb.set)
+
+        # Configure tags for status colors
+        self.file_browser_tree.tag_configure('current', background='#3498db', foreground='white')
+        self.file_browser_tree.tag_configure('completed', background='#2ecc71', foreground='white')
+        self.file_browser_tree.tag_configure('skipped', background='#f39c12', foreground='white')
+
+        fb_vsb.pack(side='right', fill='y')
+        self.file_browser_tree.pack(fill='both', expand=True)
+        self.file_browser_tree.bind("<Double-1>", self.on_file_browser_jump)
+
+    def _setup_control_panel(self, parent):
+        """Creates the entire scrollable control panel with all its widgets."""
+        # Create the boilerplate for a scrollable frame
+        outer_control_frame = tk.Frame(parent, bd=2, relief=tk.SUNKEN)
+        parent.add(outer_control_frame)
+        
+        canvas_controls = tk.Canvas(outer_control_frame, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(outer_control_frame, orient="vertical", command=canvas_controls.yview)
+        canvas_controls.configure(yscrollcommand=scrollbar.set)
+
+        # This is the frame that will hold all the actual widgets
+        control_frame = tk.Frame(canvas_controls, padx=10, pady=10)
+        canvas_controls.create_window((0, 0), window=control_frame, anchor="nw")
+
+        # Binding logic to make scrolling work
+        control_frame.bind("<Configure>", lambda e: canvas_controls.configure(scrollregion=canvas_controls.bbox("all")))
+        def on_mouse_wheel(event):
+            canvas_controls.yview_scroll(int(-1*(event.delta/120)), "units")
+        control_frame.bind_all("<MouseWheel>", on_mouse_wheel)
+
+        scrollbar.pack(side="right", fill="y")
+        canvas_controls.pack(side="left", fill="both", expand=True)
+
+        # --- Now, add all controls to the 'control_frame' ---
+        ui_font = ("Helvetica", 9, "bold")
         self.progress_label = tk.Label(control_frame, text="Progress: N/A", font=("Helvetica", 10))
         self.progress_label.pack(pady=(0, 10), anchor='w')
-        
-        # UI Font for section headers
-        ui_font = ("Helvetica", 9, "bold")
 
-        # --- Image Adjustments Frame ---
+        # --- Image Adjustments ---
         img_adj_frame = tk.LabelFrame(control_frame, text="Image Adjustments", padx=5, pady=5, font=ui_font)
         img_adj_frame.pack(fill=tk.X, pady=5)
         self.contrast_value = tk.DoubleVar(value=1.0)
-        contrast_slider = Scale(img_adj_frame, from_=0.5, to=3.0, orient=tk.HORIZONTAL, resolution=0.1,
-                                label="Contrast", variable=self.contrast_value, command=self.on_slider_change)
+        contrast_slider = Scale(img_adj_frame, from_=0.5, to=3.0, orient=tk.HORIZONTAL, resolution=0.1, label="Contrast", variable=self.contrast_value, command=self.on_slider_change)
         contrast_slider.pack(fill=tk.X)
 
-        # --- HSV Sliders ---
+        # --- HSV Color Thresholding ---
+        hsv_frame = tk.LabelFrame(control_frame, text="HSV Color Thresholding", padx=5, pady=5, font=ui_font)
+        hsv_frame.pack(fill=tk.X, pady=5)
         def create_hsv_section(parent, text, hsv_type):
             frame = tk.LabelFrame(parent, text=text, padx=5, pady=5, font=ui_font)
             frame.pack(fill=tk.X, pady=2)
@@ -491,53 +497,72 @@ class HumanInTheLoopProcessor:
             min_slider = Scale(frame, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); min_slider.pack(fill=tk.X)
             max_slider = Scale(frame, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); max_slider.pack(fill=tk.X)
             return canvas, min_slider, max_slider
-        hsv_frame = tk.LabelFrame(control_frame, text="HSV Color Thresholding", padx=5, pady=5, font=ui_font)
-        hsv_frame.pack(fill=tk.X, pady=5)
         self.hue_canvas, self.h_min, self.h_max = create_hsv_section(hsv_frame, "Hue", 'h')
         self.sat_canvas, self.s_min, self.s_max = create_hsv_section(hsv_frame, "Saturation", 's')
         self.val_canvas, self.v_min, self.v_max = create_hsv_section(hsv_frame, "Value", 'v')
         self._create_hsv_bars()
-        
-        # --- ROI Controls ---
-        adj_frame = tk.LabelFrame(control_frame, text="ROI Post-Processing", padx=5, pady=5, font=ui_font); adj_frame.pack(fill=tk.X, pady=5)
+
+        # --- ROI Post-Processing ---
+        adj_frame = tk.LabelFrame(control_frame, text="ROI Post-Processing", padx=5, pady=5, font=ui_font)
+        adj_frame.pack(fill=tk.X, pady=5)
         self.roi_expansion = Scale(adj_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="Expand/Shrink (px)", command=self.on_slider_change); self.roi_expansion.pack(fill=tk.X)
         self.min_area = Scale(adj_frame, from_=0, to=50000, orient=tk.HORIZONTAL, label="Min Area (px²)", command=self.on_slider_change); self.min_area.pack(fill=tk.X)
         self.max_area = Scale(adj_frame, from_=0, to=500000, orient=tk.HORIZONTAL, label="Max Area (px²)", command=self.on_slider_change); self.max_area.pack(fill=tk.X)
 
-        # --- Color Picker Tools ---
+        # --- Color Picker Tool ---
         picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font)
         picker_tools_frame.pack(fill=tk.X, pady=5)
-        picker_grid = tk.Frame(picker_tools_frame)
-        picker_grid.pack(fill=tk.X)
+        picker_grid = tk.Frame(picker_tools_frame); picker_grid.pack(fill=tk.X)
         self.start_color_pick_btn = tk.Button(picker_grid, text="Start Color Picking", command=self.enter_color_picker_mode)
         self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Last Pick", command=self.undo_last_color_pick)
         self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Picking", command=self.exit_color_picker_mode)
-        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
-        picker_grid.columnconfigure(0, weight=1); picker_grid.columnconfigure(1, weight=1)
+        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew'); picker_grid.columnconfigure(0, weight=1); picker_grid.columnconfigure(1, weight=1)
 
-        # --- Tool Buttons ---
-        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font); roi_tools_frame.pack(fill=tk.X, pady=5)
+        # --- ROI Tools ---
+        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font)
+        roi_tools_frame.pack(fill=tk.X, pady=5)
         tools_grid = tk.Frame(roi_tools_frame); tools_grid.pack(fill=tk.X)
         self.draw_roi_btn = tk.Button(tools_grid, text="Draw New ROI", command=self.enter_drawing_mode)
         self.finish_draw_btn = tk.Button(tools_grid, text="Finish Drawing", command=self.finalize_roi, state=tk.DISABLED, bg="#4CAF50", fg="white")
         self.cancel_draw_btn = tk.Button(tools_grid, text="Cancel Drawing", command=self.cancel_drawing)
-        self.draw_roi_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
-        tools_grid.columnconfigure(0, weight=1); tools_grid.columnconfigure(1, weight=1)
-        
-        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font); sel_action_frame.pack(fill=tk.X, pady=5)
+        self.draw_roi_btn.grid(row=0, column=0, columnspan=2, sticky='ew'); tools_grid.columnconfigure(0, weight=1); tools_grid.columnconfigure(1, weight=1)
+
+        # --- Selected ROI Actions ---
+        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font)
+        sel_action_frame.pack(fill=tk.X, pady=5)
         action_grid = tk.Frame(sel_action_frame); action_grid.pack(fill=tk.X)
         self.delete_roi_btn = tk.Button(action_grid, text="Delete Selected ROI", command=self.delete_selected_roi, state=tk.DISABLED)
         self.delete_roi_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
         self.annotate_roi_btn = tk.Button(action_grid, text="Annotate Selected ROI", command=self.annotate_selected_roi, state=tk.DISABLED)
-        self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0))
-        action_grid.columnconfigure(0, weight=1); action_grid.columnconfigure(1, weight=1)
+        self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0)); action_grid.columnconfigure(0, weight=1); action_grid.columnconfigure(1, weight=1)
 
-        # --- Final Actions ---
-        action_frame = tk.LabelFrame(control_frame, text="Image Actions", padx=5, pady=5, font=ui_font); action_frame.pack(fill=tk.X, pady=5, side=tk.BOTTOM)
+        # --- Image Actions ---
+        action_frame = tk.LabelFrame(control_frame, text="Image Actions", padx=5, pady=5, font=ui_font)
+        action_frame.pack(fill=tk.X, pady=5, side=tk.BOTTOM)
         tk.Button(action_frame, text="Reset HSV Controls", command=self.reset_hsv_defaults).pack(fill=tk.X, pady=2)
         tk.Button(action_frame, text="Accept & Next (Space)", command=self.handle_accept, bg="#4CAF50", fg="black", height=2).pack(fill=tk.X, pady=2)
         tk.Button(action_frame, text="Skip Image (S)", command=self.handle_skip, bg="#FF9800", fg="black", height=2).pack(fill=tk.X, pady=2)
-        self.reset_hsv_defaults()
+
+    def _setup_viewer_and_results(self, parent):
+        """Creates the image viewer and the live results table."""
+        # --- Image Viewer ---
+        image_frame = tk.Frame(parent, bg="gray")
+        parent.add(image_frame, height=650)
+        self.image_label = tk.Label(image_frame, bg="gray")
+        self.image_label.pack(expand=True, fill=tk.BOTH)
+        self.image_label.bind("<MouseWheel>", self.on_preview_zoom)
+        self.image_label.bind("<Button-1>", self.handle_image_left_click)
+
+        # --- Live Results Table ---
+        results_frame = tk.LabelFrame(parent, text="Live ROI Measurements", padx=5, pady=5)
+        parent.add(results_frame, height=250)
+        self.results_tree = ttk.Treeview(results_frame, show='headings')
+        vsb = ttk.Scrollbar(results_frame, orient="vertical", command=self.results_tree.yview)
+        hsb = ttk.Scrollbar(results_frame, orient="horizontal", command=self.results_tree.xview)
+        self.results_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        vsb.pack(side='right', fill='y')
+        hsb.pack(side='bottom', fill='x')
+        self.results_tree.pack(fill='both', expand=True)
 
     # Creates the HSV bars for visualizing the color thresholds.
     def _create_hsv_bars(self):
@@ -577,7 +602,7 @@ class HumanInTheLoopProcessor:
         self.v_min.set(48)
         self.v_max.set(196)
         self.min_area.set(1500)
-        self.max_area.set(50000)   # Set your desired default maximum area here
+        self.max_area.set(80000)   # Set your desired default maximum area here
         self.on_slider_change(None)
 
     # Runs the entire detection pipeline, including contrast adjustment, HSV thresholding, contour detection, and ROI post-processing.
@@ -678,9 +703,11 @@ class HumanInTheLoopProcessor:
             if i == self.selected_roi_index: self.results_tree.selection_set(item)
 
     # Handles the acceptance of the current image and saves measurements.
-        # Handles the acceptance of the current image and saves measurements.
     def handle_accept(self, event=None):
         if not self.image_paths: return
+        ### FILE BROWSER FEATURE: Update status before proceeding ###
+        self.update_file_browser_status(self.current_image_index, 'completed')
+
         current_path = self.image_paths[self.current_image_index]; current_filename = os.path.basename(current_path)
         image_results = []
         for i, roi in enumerate(self.final_rois):
@@ -690,15 +717,9 @@ class HumanInTheLoopProcessor:
             solidity=float(pixel_area)/hull_area if hull_area!=0 else 0
             circularity=(4*math.pi*pixel_area)/(pixel_perimeter**2) if pixel_perimeter!=0 else 0
             orientation=cv2.fitEllipse(roi)[-1] if len(roi)>=5 else np.nan
-            
-            ### RECALIBRATE FEATURE: Use current scale factor for calculations ###
-            scaled_area=pixel_area/(self.scale_factor**2)
-            scaled_perimeter=pixel_perimeter/self.scale_factor
+            scaled_area=pixel_area/(self.scale_factor**2); scaled_perimeter=pixel_perimeter/self.scale_factor
             scaled_equiv_diameter=(np.sqrt(4*pixel_area/np.pi))/self.scale_factor
-            
             roi_id = i + 1; annotation = self.manual_annotations.get(roi_id, {})
-            
-            ### RECALIBRATE FEATURE: Use generic column names for appending data ###
             image_results.append({
                 'Session_ID': self.session_id, 'Image_Number': self.current_image_index + 1, 'Filename': current_filename, 
                 'ROI_ID': roi_id, 'Measurement_Unit': self.scale_unit,
@@ -708,36 +729,38 @@ class HumanInTheLoopProcessor:
                 'Long_Axis_Length': annotation.get('Long_Axis_Length', ''), 'Short_Axis_Length': annotation.get('Short_Axis_Length', ''),
                 'Long_Axis_Texture': annotation.get('Long_Axis_Texture', ''), 'Short_Axis_Texture': annotation.get('Short_Axis_Texture', '')
             })
-            
         if image_results: self.results_df = pd.concat([self.results_df, pd.DataFrame(image_results)], ignore_index=True)
         temp_csv_path = os.path.join(self.output_subdirs['temp_measurements'], f"temp_results_{self.session_id}.csv")
         self.results_df.to_csv(temp_csv_path, index=False, float_format='%.4f')
         base_name = os.path.splitext(current_filename)[0]
-        
-        # Create the final binary mask and ROI image for saving
         final_mask = np.zeros(self.original_image.shape[:2], dtype=np.uint8)
-        if self.final_rois:
-            cv2.drawContours(final_mask, self.final_rois, -1, 255, -1)
-        
+        if self.final_rois: cv2.drawContours(final_mask, self.final_rois, -1, 255, -1)
         final_roi_image = self.original_image.copy()
-        if self.final_rois:
-            cv2.drawContours(final_roi_image, self.final_rois, -1, (0, 255, 0), 2)
-            
+        if self.final_rois: cv2.drawContours(final_roi_image, self.final_rois, -1, (0, 255, 0), 2)
         cv2.imwrite(os.path.join(self.output_subdirs['image_with_roi'], f"{base_name}_roi.jpg"), final_roi_image)
         cv2.imwrite(os.path.join(self.output_subdirs['filled_masks'], f"{base_name}_mask.png"), final_mask)
         
-        self.current_image_index += 1; self.process_next_image()
+        self.current_image_index += 1
+        self.process_next_image()
 
     # Handles skipping the current image, copying it to the skipped directory if not corrupt.
     def handle_skip(self, event=None, is_corrupt=False):
         if not self.image_paths: return
+        
+        ### FILE BROWSER FEATURE: Update status before proceeding ###
+        self.update_file_browser_status(self.current_image_index, 'skipped')
+
         current_path = self.image_paths[self.current_image_index]
         destination_path = os.path.join(self.output_subdirs['skipped'], os.path.basename(current_path))
         print(f"Skipping image: {os.path.basename(current_path)}")
         if not is_corrupt:
-            try: shutil.copy(current_path, destination_path)
-            except Exception as e: print(f"Could not copy skipped file: {e}")
-        self.current_image_index += 1; self.process_next_image()
+            try:
+                shutil.copy(current_path, destination_path)
+            except Exception as e:
+                print(f"Could not copy skipped file: {e}")
+            
+        self.current_image_index += 1
+        self.process_next_image()
 
     # Handles left-click events on the image label to select or draw ROIs.
     def handle_image_left_click(self, event):
@@ -887,9 +910,9 @@ class HumanInTheLoopProcessor:
 
         # Warn the user about changing the scale mid-session
         msg = "You are about to change the measurement scale.\n\n" \
-              "All measurements from this point forward will use the new scale. " \
-              "Previously saved data in this session will NOT be changed.\n\n" \
-              "Do you want to continue?"
+            "All measurements from this point forward will use the new scale. " \
+            "Previously saved data in this session will NOT be changed.\n\n" \
+            "Do you want to continue?"
         if not messagebox.askokcancel("Scale Recalibration Warning", msg, parent=self.root):
             return
 
@@ -909,6 +932,72 @@ class HumanInTheLoopProcessor:
             messagebox.showinfo("Scale Updated", f"Scale has been updated.\nNew scale: 1 {self.scale_unit} = {self.scale_factor:.4f} pixels.", parent=self.root)
         else:
             messagebox.showwarning("Calibration Canceled", "The scale was not changed.", parent=self.root)
+
+        ### NEW FEATURE: File Browser Methods ###
+    def populate_file_browser(self):
+        """Clears and fills the file browser tree with image filenames."""
+        if not self.file_browser_tree: return
+        # Clear existing entries
+        for i in self.file_browser_tree.get_children():
+            self.file_browser_tree.delete(i)
+        # Add all image names to the browser, storing the original index as the iid
+        for i, path in enumerate(self.image_paths):
+            filename = os.path.basename(path)
+            # The iid (item ID) is the string representation of the image's index
+            self.file_browser_tree.insert('', 'end', iid=str(i), text=f" {filename}")
+
+    def update_file_browser_status(self, index, status):
+        """Updates the visual status of an item in the file browser."""
+        if not self.file_browser_tree: return
+
+        # First, find and reset the tag of any previously 'current' item
+        for iid in self.file_browser_tree.get_children():
+            if 'current' in self.file_browser_tree.item(iid, 'tags'):
+                current_tags = list(self.file_browser_tree.item(iid, 'tags'))
+                current_tags.remove('current')
+                self.file_browser_tree.item(iid, tags=tuple(current_tags))
+                break # Assume only one can be current at a time
+
+        # Now, set the new tag for the specified index
+        item_id = str(index)
+        if self.file_browser_tree.exists(item_id):
+            existing_tags = list(self.file_browser_tree.item(item_id, 'tags'))
+            if status not in existing_tags:
+                existing_tags.append(status)
+            self.file_browser_tree.item(item_id, tags=tuple(existing_tags))
+            
+            # If the new status is 'current', ensure it's visible
+            if status == 'current':
+                self.file_browser_tree.see(item_id)
+                self.file_browser_tree.selection_set(item_id)
+
+    def on_file_browser_jump(self, event):
+        """Handles double-click events to jump to a specific image."""
+        selected_item_id = self.file_browser_tree.focus()
+        if not selected_item_id: return
+
+        target_index = int(selected_item_id)
+        if target_index == self.current_image_index: return # Already on this image
+
+        msg = "You are about to jump to a different image.\n\n" \
+            "The current image will be SKIPPED, and any changes will be lost.\n\n" \
+            "Are you sure you want to continue?"
+        
+        if messagebox.askyesno("Confirm Jump", msg, parent=self.root):
+            # Mark the current image as skipped before jumping
+            self.update_file_browser_status(self.current_image_index, 'skipped')
+            # Set the new index and process the image
+            self.current_image_index = target_index
+            self.process_next_image()
+
+    def toggle_file_browser(self):
+        """Shows or hides the file browser pane."""
+        # Check if the frame is currently part of the pane's children
+        if self.file_browser_frame in self.left_pane.panes():
+            self.left_pane.forget(self.file_browser_frame)
+        else:
+            # Re-add the frame at the top (index 0) using the insert method
+            self.left_pane.insert(0, self.file_browser_frame, height=250)
 
     # Undoes the last color pick, restoring the previous HSV values.    
     def undo_last_color_pick(self):
@@ -992,19 +1081,32 @@ class HumanInTheLoopProcessor:
         valid_extensions = ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp')
         self.image_paths = sorted([os.path.join(self.input_dir, f) for f in os.listdir(self.input_dir) if f.lower().endswith(valid_extensions)])
         self.total_images = len(self.image_paths)
-        if self.total_images == 0: messagebox.showerror("Error", "No valid images found in the selected directory.")
+        if self.total_images == 0:
+            messagebox.showerror("Error", "No valid images found in the selected directory.")
+        ### FILE BROWSER FEATURE: Populate the list upon loading ###
+        else:
+            self.populate_file_browser()
 
     # Processes the next image in the list, resetting the state and updating the display.
     def process_next_image(self):
-        if self.current_image_index >= self.total_images: self.finalize_session(); return
+        if self.current_image_index >= self.total_images:
+            self.finalize_session()
+            return
+            
         self.manual_annotations.clear(); self.cancel_drawing(); self.exit_color_picker_mode(); self.deselect_roi(); self.preview_zoom_factor = 1.0
         self.progress_label.config(text=f"Image {self.current_image_index + 1} of {self.total_images}")
+        
+        ### FILE BROWSER FEATURE: Update status for the new current image ###
+        self.update_file_browser_status(self.current_image_index, 'current')
+
         image_path = self.image_paths[self.current_image_index]
         self.original_image = cv2.imread(image_path)
         if self.original_image is None:
             messagebox.showwarning("File Error", f"Could not read image file:\n{os.path.basename(image_path)}\nIt will be skipped.")
-            self.handle_skip(is_corrupt=True); return
-        self.reset_hsv_defaults() # Resets sliders for each new image
+            self.handle_skip(is_corrupt=True)
+            return
+            
+        self.reset_hsv_defaults()
 
     # Updates the HSV bars and runs the detection pipeline when sliders are changed.
     def on_slider_change(self, _):
