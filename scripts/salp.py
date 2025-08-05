@@ -39,12 +39,13 @@ def resource_path(relative_path):
 # ==============================================================================
 # This window allows users to select two points on an image and define a scale based on the distance between those points.
 class ScaleCalibrationWindow(Toplevel):
-    # Provides a GUI for advanced scale calibration by selecting two points on an image.
+    # Provides a GUI for advanced scale calibration with multiple options.
     def __init__(self, parent, image):
         super().__init__(parent)
         self.title("Advanced Scale Calibration")
         self.transient(parent)
-        self.geometry("900x700")
+        # Increased default width to accommodate the new control panel
+        self.geometry("1200x700") 
         self.original_image = image
         self.h, self.w = image.shape[:2]
         self.zoom_level, self.view_x, self.view_y = 1.0, 0, 0
@@ -53,22 +54,182 @@ class ScaleCalibrationWindow(Toplevel):
         self.drag_state, self.last_drag_x, self.last_drag_y = None, 0, 0
         self.min_zoom = 1.0
         self.loupe_active, self.last_mouse_pos, self.selected_point = True, (0, 0), None
+
+        # --- NEW: Variables for the new UI controls ---
+        self.drawn_pixel_label_var = tk.StringVar(value="Pixel length: N/A")
+        self.drawn_length_var = tk.StringVar(value="1.0")
+        self.drawn_unit_var = tk.StringVar(value="mm")
+        
+        self.manual_px_var = tk.StringVar(value="100")
+        self.manual_length_var = tk.StringVar(value="1.0")
+        self.manual_unit_var = tk.StringVar(value="mm")
+        # --- END NEW ---
+
         self.setup_widgets()
         self.bind_events()
         self.canvas.focus_set()
         self.after(100, self.reset_view)
 
     def setup_widgets(self):
-        controls_frame = tk.Frame(self)
-        controls_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
-        self.info_label = tk.Label(controls_frame, text="Click a point, then use Arrow Keys to nudge. Loupe is in top-right.", font=("Helvetica", 10))
+        # Main layout frame
+        main_frame = tk.Frame(self)
+        main_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Top bar for instructions and view controls
+        top_controls_frame = tk.Frame(main_frame)
+        top_controls_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=5)
+        self.info_label = tk.Label(top_controls_frame, text="Click two points to draw a line, or use the panel on the right.", font=("Helvetica", 10))
         self.info_label.pack(side=tk.LEFT, expand=True)
-        tk.Button(controls_frame, text="Reset View", command=self.reset_view).pack(side=tk.LEFT, padx=2)
-        tk.Button(controls_frame, text="Clear Line", command=self.clear_line).pack(side=tk.LEFT, padx=2)
-        tk.Button(controls_frame, text="Confirm Scale", command=self.confirm_scale, font=("Helvetica", 10, "bold"), bg="#4CAF50", fg="white").pack(side=tk.RIGHT, padx=5)
-        self.canvas = tk.Canvas(self, bg="gray", highlightthickness=0)
+        tk.Button(top_controls_frame, text="Reset View", command=self.reset_view).pack(side=tk.LEFT, padx=2)
+        tk.Button(top_controls_frame, text="Clear Line", command=self.clear_line).pack(side=tk.LEFT, padx=2)
+        
+        # Canvas for the image
+        self.canvas = tk.Canvas(main_frame, bg="gray", highlightthickness=0)
         self.canvas.pack(expand=True, fill=tk.BOTH)
 
+        # --- NEW: Side Panel for Scale Options ---
+        side_panel = tk.Frame(self, width=300, padx=10, pady=10)
+        side_panel.pack(side=tk.RIGHT, fill=tk.Y)
+        side_panel.pack_propagate(False) # Prevent panel from shrinking
+
+        # --- Section 1: Calibrate with Drawn Line ---
+        frame1 = ttk.Labelframe(side_panel, text=" Option 1: Calibrate with Drawn Line ")
+        frame1.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(frame1, textvariable=self.drawn_pixel_label_var).grid(row=0, column=0, columnspan=2, sticky="w", pady=5, padx=5)
+        tk.Label(frame1, text="Real Length:").grid(row=1, column=0, sticky="w", padx=5)
+        tk.Entry(frame1, textvariable=self.drawn_length_var, width=10).grid(row=1, column=1, sticky="ew", padx=5)
+        tk.Label(frame1, text="Unit:").grid(row=2, column=0, sticky="w", padx=5)
+        tk.Entry(frame1, textvariable=self.drawn_unit_var, width=10).grid(row=2, column=1, sticky="ew", padx=5)
+        self.confirm_drawn_btn = tk.Button(frame1, text="Confirm Drawn Scale", command=self.confirm_drawn_scale, state=tk.DISABLED)
+        self.confirm_drawn_btn.grid(row=3, column=0, columnspan=2, pady=10, padx=5, sticky="ew")
+        frame1.columnconfigure(1, weight=1)
+
+        # --- Section 2: Calibrate Manually ---
+        frame2 = ttk.Labelframe(side_panel, text=" Option 2: Enter Scale Manually ")
+        frame2.pack(fill=tk.X, pady=10)
+
+        tk.Entry(frame2, textvariable=self.manual_px_var, width=6).grid(row=0, column=0, padx=5, pady=5)
+        tk.Label(frame2, text="pixels  =").grid(row=0, column=1)
+        tk.Entry(frame2, textvariable=self.manual_length_var, width=6).grid(row=0, column=2, padx=5)
+        tk.Entry(frame2, textvariable=self.manual_unit_var, width=6).grid(row=0, column=3, padx=5)
+        tk.Button(frame2, text="Confirm Manual Scale", command=self.confirm_manual_scale).grid(row=1, column=0, columnspan=4, pady=10, padx=5, sticky="ew")
+
+        # --- Section 3: Set Scale Later ---
+        frame3 = ttk.Labelframe(side_panel, text=" Option 3: Skip Calibration ")
+        frame3.pack(fill=tk.X, pady=10)
+        tk.Button(frame3, text="Set Scale Later (Use Pixels)", command=self.set_scale_later).pack(fill=tk.X, pady=10, padx=5)
+        # --- END NEW ---
+
+    # --- NEW: Helper function to update UI based on line state ---
+    def update_line_info(self):
+        if self.p1 and self.p2:
+            dist_px = math.dist(self.p1, self.p2)
+            self.drawn_pixel_label_var.set(f"Pixel length: {dist_px:.2f}")
+            self.confirm_drawn_btn.config(state=tk.NORMAL)
+        else:
+            self.drawn_pixel_label_var.set("Pixel length: N/A")
+            self.confirm_drawn_btn.config(state=tk.DISABLED)
+
+    # --- MODIFIED: on_press, on_drag, on_key_press, clear_line now call update_line_info ---
+    def on_press(self, e):
+        # ... (rest of the function is the same)
+        if self.p1 and math.dist(self.image_to_canvas_coords(self.p1),(e.x,e.y))<10:
+            self.drag_state='p1'; self.selected_point='p1'; self.loupe_active=False; return
+        if self.p2 and math.dist(self.image_to_canvas_coords(self.p2),(e.x,e.y))<10:
+            self.drag_state='p2'; self.selected_point='p2'; self.loupe_active=False; return
+        coords=self.canvas_to_image_coords((e.x,e.y))
+        if not self.p1:
+            self.p1=coords; self.selected_point='p1'; self.info_label.config(text="Left-click END point or use Arrow Keys.")
+        elif not self.p2:
+            self.p2=coords; self.selected_point='p2'; self.info_label.config(text="Drag points or use Arrow Keys. Then Confirm.")
+        
+        self.update_display()
+        self.update_line_info() # Update the UI
+
+    def on_drag(self, e):
+        # ... (rest of the function is the same)
+        if self.drag_state in ['p1', 'p2']:
+            coords = self.canvas_to_image_coords((e.x, e.y))
+            if self.drag_state == 'p1': self.p1 = coords
+            else: self.p2 = coords
+            self.update_display()
+            self.update_line_info() # Update the UI
+
+    def on_key_press(self, event):
+        # ... (rest of the function is the same)
+        if not self.selected_point: return
+        dx, dy = 0, 0
+        if event.keysym == "Left": dx = -1
+        elif event.keysym == "Right": dx = 1
+        elif event.keysym == "Up": dy = -1
+        elif event.keysym == "Down": dy = 1
+        if dx != 0 or dy != 0:
+            if self.selected_point == 'p1' and self.p1: self.p1 = (self.p1[0] + dx, self.p1[1] + dy)
+            elif self.selected_point == 'p2' and self.p2: self.p2 = (self.p2[0] + dx, self.p2[1] + dy)
+            self.update_display()
+            self.update_line_info() # Update the UI
+
+    def clear_line(self):
+        self.p1, self.p2, self.drag_state, self.selected_point = None, None, None, None
+        self.info_label.config(text="Line cleared. Click START point.")
+        self.update_display()
+        self.update_line_info() # Update the UI
+
+    # --- NEW: Confirmation logic for each of the three options ---
+    def confirm_drawn_scale(self):
+        try:
+            dist_px = math.dist(self.p1, self.p2)
+            length_real = float(self.drawn_length_var.get())
+            unit = self.drawn_unit_var.get().strip()
+            if not unit:
+                messagebox.showerror("Input Error", "Unit cannot be empty.", parent=self)
+                return
+            if length_real <= 0:
+                messagebox.showerror("Input Error", "Real length must be a positive number.", parent=self)
+                return
+
+            self.scale_factor = dist_px / length_real
+            self.scale_unit = unit
+            self.is_confirmed = True
+            self.destroy()
+
+        except ValueError:
+            messagebox.showerror("Input Error", "Please enter a valid number for the real length.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Error", f"An unexpected error occurred: {e}", parent=self)
+            
+    def confirm_manual_scale(self):
+        try:
+            pixels = float(self.manual_px_var.get())
+            length_real = float(self.manual_length_var.get())
+            unit = self.manual_unit_var.get().strip()
+
+            if not unit:
+                messagebox.showerror("Input Error", "Unit cannot be empty.", parent=self)
+                return
+            if pixels <= 0 or length_real <= 0:
+                messagebox.showerror("Input Error", "Pixel and real length values must be positive.", parent=self)
+                return
+            
+            self.scale_factor = pixels / length_real
+            self.scale_unit = unit
+            self.is_confirmed = True
+            self.destroy()
+
+        except ValueError:
+            messagebox.showerror("Input Error", "Please enter valid numbers for pixels and real length.", parent=self)
+        except Exception as e:
+            messagebox.showerror("Error", f"An unexpected error occurred: {e}", parent=self)
+
+    def set_scale_later(self):
+        self.is_confirmed = True # Confirmed to skip, not to set a value
+        self.scale_factor = 1.0
+        self.scale_unit = "px"
+        self.destroy()
+
+    # --- ALL OTHER METHODS BELOW THIS LINE ARE UNCHANGED ---
+    # (update_display, draw_loupe, canvas_to_image_coords, on_mouse_wheel, etc.)
     def bind_events(self):
         self.canvas.bind("<MouseWheel>", self.on_mouse_wheel); self.canvas.bind("<Button-4>", self.on_mouse_wheel); self.canvas.bind("<Button-5>", self.on_mouse_wheel)
         self.canvas.bind("<ButtonPress-1>", self.on_press)
@@ -80,6 +241,11 @@ class ScaleCalibrationWindow(Toplevel):
         self.canvas.bind("<Enter>", lambda e: self.canvas.focus_set())
         self.canvas.bind("<KeyPress-Left>", self.on_key_press); self.canvas.bind("<KeyPress-Right>", self.on_key_press)
         self.canvas.bind("<KeyPress-Up>", self.on_key_press); self.canvas.bind("<KeyPress-Down>", self.on_key_press)
+
+    def on_closing(self):
+        # Default behavior is to act like "Set Scale Later"
+        self.is_confirmed = False
+        self.destroy()
 
     def update_display(self):
         canvas_w, canvas_h = self.canvas.winfo_width(), self.canvas.winfo_height()
@@ -109,24 +275,33 @@ class ScaleCalibrationWindow(Toplevel):
     def draw_loupe(self, display_img):
         LOUPE_SIZE, LOUPE_RADIUS, LOUPE_ZOOM = 150, 75, 8
         img_coords = self.canvas_to_image_coords(self.last_mouse_pos)
-        region_size = LOUPE_SIZE // LOUPE_ZOOM
+        region_size = LOUPE_SIZE // LOUPE_ZOOM 
         x1, y1 = max(0, img_coords[0] - region_size // 2), max(0, img_coords[1] - region_size // 2)
         x2, y2 = min(self.w, x1 + region_size), min(self.h, y1 + region_size)
         region = self.original_image[y1:y2, x1:x2]
         if region.size > 0:
             zoomed_region = cv2.resize(region, (LOUPE_SIZE, LOUPE_SIZE), interpolation=cv2.INTER_NEAREST)
             lx, ly = display_img.shape[1] - LOUPE_SIZE - 10, 10
+            # Create a circular mask for the loupe
             mask = np.zeros((LOUPE_SIZE, LOUPE_SIZE), dtype=np.uint8)
             cv2.circle(mask, (LOUPE_RADIUS, LOUPE_RADIUS), LOUPE_RADIUS, 255, -1)
+            # Apply the mask to the zoomed region before placing it on the display image
             display_img[ly:ly+LOUPE_SIZE, lx:lx+LOUPE_SIZE] = cv2.bitwise_and(zoomed_region, zoomed_region, mask=mask)
+            # Draw the white border circle and red crosshairs
             cv2.circle(display_img, (lx + LOUPE_RADIUS, ly + LOUPE_RADIUS), LOUPE_RADIUS, (255, 255, 255), 2)
             cv2.line(display_img, (lx + LOUPE_RADIUS, ly), (lx + LOUPE_RADIUS, ly + LOUPE_SIZE), (0, 0, 255), 1)
             cv2.line(display_img, (lx, ly + LOUPE_RADIUS), (lx + LOUPE_SIZE, ly + LOUPE_RADIUS), (0, 0, 255), 1)
-    # Converts canvas coordinates to image coordinates and vice versa.
-    def canvas_to_image_coords(self, c): return (int((c[0]/self.zoom_level)+self.view_x), int((c[1]/self.zoom_level)+self.view_y))
-    def image_to_canvas_coords(self, i): return (int((i[0]-self.view_x)*self.zoom_level), int((i[1]-self.view_y)*self.zoom_level))
-    # Handles mouse wheel events to zoom in or out of the image.
+
+    def canvas_to_image_coords(self, c): 
+        """Converts canvas coordinates to image coordinates."""
+        return (int((c[0] / self.zoom_level) + self.view_x), int((c[1] / self.zoom_level) + self.view_y))
+
+    def image_to_canvas_coords(self, i): 
+        """Converts image coordinates to canvas coordinates."""
+        return (int((i[0] - self.view_x) * self.zoom_level), int((i[1] - self.view_y) * self.zoom_level))
+
     def on_mouse_wheel(self, e):
+        """Handles mouse wheel events to zoom in or out of the image."""
         factor = 1.1 if (e.num == 4 or e.delta > 0) else 1 / 1.1
         self.zoom_level = max(self.min_zoom, self.zoom_level * factor)
         img_coords = self.canvas_to_image_coords((e.x, e.y))
@@ -134,125 +309,112 @@ class ScaleCalibrationWindow(Toplevel):
         self.view_y = int(img_coords[1] - (e.y / self.zoom_level))
         self.update_display()
 
-    # Handles mouse clicks to select points for the scale line.
-    def on_press(self, e):
-        if self.p1 and math.dist(self.image_to_canvas_coords(self.p1),(e.x,e.y))<10:
-            self.drag_state='p1'; self.selected_point='p1'; self.loupe_active=False; return
-        if self.p2 and math.dist(self.image_to_canvas_coords(self.p2),(e.x,e.y))<10:
-            self.drag_state='p2'; self.selected_point='p2'; self.loupe_active=False; return
-        coords=self.canvas_to_image_coords((e.x,e.y))
-        if not self.p1:
-            self.p1=coords; self.selected_point='p1'; self.info_label.config(text="Left-click END point or use Arrow Keys.")
-        elif not self.p2:
-            self.p2=coords; self.selected_point='p2'; self.info_label.config(text="Drag points or use Arrow Keys. Then Confirm.")
-        self.update_display()
-
-    # Handles panning the view when pressing the middle or right mouse button.
     def on_pan_press(self, e):
-        self.drag_state='pan'; self.loupe_active=False; self.last_drag_x,self.last_drag_y=e.x,e.y; self.canvas.config(cursor="fleur")
+        """Handles panning the view when pressing the middle or right mouse button."""
+        self.drag_state = 'pan'
+        self.loupe_active = False
+        self.last_drag_x, self.last_drag_y = e.x, e.y
+        self.canvas.config(cursor="fleur")
 
-    # Handles dragging points to adjust their positions.
-    def on_drag(self, e):
-        if self.drag_state in ['p1', 'p2']:
-            coords = self.canvas_to_image_coords((e.x, e.y))
-            if self.drag_state == 'p1': self.p1 = coords
-            else: self.p2 = coords
-            self.update_display()
-
-    # Handles panning the view when dragging with the middle or right mouse button.    
     def on_pan_drag(self, e):
-        if self.drag_state=='pan':
-            dx,dy=e.x-self.last_drag_x,e.y-self.last_drag_y
-            self.view_x-=int(dx/self.zoom_level); self.view_y-=int(dy/self.zoom_level)
-            self.last_drag_x,self.last_drag_y=e.x,e.y
+        """Handles panning the view when dragging with the middle or right mouse button."""
+        if self.drag_state == 'pan':
+            dx, dy = e.x - self.last_drag_x, e.y - self.last_drag_y
+            self.view_x -= int(dx / self.zoom_level)
+            self.view_y -= int(dy / self.zoom_level)
+            self.last_drag_x, self.last_drag_y = e.x, e.y
             self.update_display()
 
-    # Handles mouse hover events to update the cursor and activate loupe mode.
     def on_hover(self, e):
+        """Handles mouse hover events to update the cursor and activate loupe mode."""
         self.last_mouse_pos = (e.x, e.y)
-        cursor="crosshair"
-        if self.p1 and math.dist(self.image_to_canvas_coords(self.p1),(e.x,e.y))<10: cursor="hand2"
-        elif self.p2 and math.dist(self.image_to_canvas_coords(self.p2),(e.x,e.y))<10: cursor="hand2"
-        if self.drag_state and not e.state & (256 | 1024):
+        cursor = "crosshair"
+        # Check if mouse is near a point to change cursor
+        if self.p1 and math.dist(self.image_to_canvas_coords(self.p1), (e.x, e.y)) < 10: 
+            cursor = "hand2"
+        elif self.p2 and math.dist(self.image_to_canvas_coords(self.p2), (e.x, e.y)) < 10: 
+            cursor = "hand2"
+        
+        # If a drag was just released, reset state and re-activate loupe
+        if self.drag_state and not (e.state & (256 | 1024)): # Check if mouse buttons are up
             self.drag_state, self.loupe_active = None, True
-        if self.drag_state != 'pan': self.canvas.config(cursor=cursor)
+        
+        if self.drag_state != 'pan': 
+            self.canvas.config(cursor=cursor)
+            
         self.update_display()
 
-    # Handles key presses for nudging the selected point.
-    def on_key_press(self, event):
-        if not self.selected_point: return
-        dx, dy = 0, 0
-        if event.keysym == "Left": dx = -1
-        elif event.keysym == "Right": dx = 1
-        elif event.keysym == "Up": dy = -1
-        elif event.keysym == "Down": dy = 1
-        if dx != 0 or dy != 0:
-            if self.selected_point == 'p1' and self.p1: self.p1 = (self.p1[0] + dx, self.p1[1] + dy)
-            elif self.selected_point == 'p2' and self.p2: self.p2 = (self.p2[0] + dx, self.p2[1] + dy)
-            self.update_display()
-
-    # Clears the drawn line and resets the state.
-    def clear_line(self):
-        self.p1, self.p2, self.drag_state, self.selected_point = None, None, None, None
-        self.info_label.config(text="Line cleared. Click START point."); self.update_display()
-
-    # Resets the view to the original image size and zoom level. 
     def reset_view(self):
+        """Resets the view to the original image size and zoom level."""
         canvas_w, canvas_h = self.canvas.winfo_width(), self.canvas.winfo_height()
-        if canvas_w <= 1 or canvas_h <= 1: self.after(50, self.reset_view); return
+        if canvas_w <= 1 or canvas_h <= 1: 
+            self.after(50, self.reset_view)
+            return
+        # Calculate zoom to fit whole image
         self.min_zoom = min(canvas_w / self.w, canvas_h / self.h)
         self.zoom_level = self.min_zoom
         self.view_x, self.view_y = 0, 0
         self.update_display()
 
-    # Confirms the scale based on the drawn line and user input.   
-    def confirm_scale(self):
-        if not self.p1 or not self.p2: messagebox.showerror("Error","Please draw a line first.", parent=self); return
-        dist_px = math.dist(self.p1, self.p2)
-        length_real = simpledialog.askfloat("Enter Scale", f"The line is {dist_px:.2f} pixels long.\nWhat is the REAL length of the line?", parent=self)
-        if length_real is not None and length_real > 0:
-            unit = simpledialog.askstring("Enter Unit", "What is the unit of measurement? (e.g., cm, mm, µm)", parent=self)
-            if unit and unit.strip():
-                self.scale_factor = dist_px / length_real
-                self.scale_unit = unit.strip()
-                self.is_confirmed = True
-                self.destroy()
-
-    # Handles the window closing event, setting the confirmation flag to False.
-    def on_closing(self):
-        self.is_confirmed=False
-        self.destroy()
 
 # ==============================================================================
-#  Side Annotation Window
+# Side Annotation Window
 # ==============================================================================
-
 # This window allows users to annotate the long and short axes of an object in an image, providing options for texture classification.
 class SideAnnotationWindow(Toplevel):
-
-    # Provides a GUI for annotating the long and short axes of an object in an image.
+    """Provides a GUI for annotating the long and short axes of an object in an image."""
+    
     def __init__(self, parent, image, roi, scale_factor, scale_unit):
         super().__init__(parent)
         self.title("Annotate Sides")
         self.transient(parent)
         self.is_confirmed, self.annotation_data = False, {}
+
+        self.LONG_AXIS_COLOR_BGR = (255, 0, 0)  # Blue for OpenCV (BGR)
+        self.SHORT_AXIS_COLOR_BGR = (0, 0, 255) # Red for OpenCV (BGR)
+        self.LONG_AXIS_COLOR_TK = "blue"       # Color name for Tkinter label
+        self.SHORT_AXIS_COLOR_TK = "red"       # Color name for Tkinter label
+
+        # Get the properties of the minimum area (rotated) rectangle
         rect = cv2.minAreaRect(roi)
-        box = cv2.boxPoints(rect)
-        self.box = np.int0(box)
-        w, h = rect[1]
-        self.long_axis_px, self.short_axis_px = max(w, h), min(w, h)
-        self.long_axis_scaled, self.short_axis_scaled = self.long_axis_px / scale_factor, self.short_axis_px / scale_factor
+        box_float = cv2.boxPoints(rect)
+        self.box = np.int0(box_float)
+
+        # Get the width and height for measurement calculations 
+        w_px, h_px = rect[1]
+        self.long_axis_px, self.short_axis_px = max(w_px, h_px), min(w_px, h_px)
+        self.long_axis_scaled = self.long_axis_px / scale_factor
+        self.short_axis_scaled = self.short_axis_px / scale_factor
         self.scale_unit = scale_unit
         self.long_axis_texture, self.short_axis_texture = StringVar(value="N/A"), StringVar(value="N/A")
-        x, y, w, h = cv2.boundingRect(roi)
-        padding = 20
-        self.roi_img = image[max(0, y-padding):y+h+padding, max(0, x-padding):x+w+padding]
-        self.roi_adjusted = roi - (x-padding, y-padding)
-        self.box_adjusted = self.box - (x-padding, y-padding)
+
+        #  Get the bounding box of the *rotated box's corners*.
+        x, y, w, h = cv2.boundingRect(self.box)
+
+        # Calculate padding based on the object's size.
+        #    This provides a nice "zoomed-out" view with good context.
+        #   20% of the largest dimension as padding.
+        padding = int(max(w, h) * 0.20)
+
+        # Get the image slice with robust boundaries, ensuring we don't go out of the image bounds.
+        img_h, img_w = image.shape[:2]
+        x1 = max(0, x - padding)
+        y1 = max(0, y - padding)
+        x2 = min(img_w, x + w + padding)
+        y2 = min(img_h, y + h + padding)
+        self.roi_img = image[y1:y2, x1:x2]
+
+        # Adjust the coordinates of the ROI contour and the rotated box to be relative
+        #    to the new cropped image (self.roi_img).
+        self.roi_adjusted = roi - (x1, y1)
+        self.box_adjusted = self.box - (x1, y1)
+
+        # --- END OF MODIFIED LOGIC ---
+
         self.setup_widgets()
 
-    # Sets up the GUI widgets for the annotation window.
     def setup_widgets(self):
+        """Sets up the GUI widgets for the annotation window."""
         main_frame = tk.Frame(self, padx=10, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.canvas = tk.Canvas(main_frame, bg="gray")
@@ -261,26 +423,60 @@ class SideAnnotationWindow(Toplevel):
         controls_frame = tk.Frame(main_frame)
         controls_frame.pack(fill=tk.X, expand=True)
         options = ["N/A", "Smooth", "Rough"]
-        tk.Label(controls_frame, text=f"Long Axis: {self.long_axis_scaled:.2f} {self.scale_unit}").grid(row=0, column=0, sticky="w", pady=2)
+
+        # --- MODIFIED: Added 'fg' (foreground color) to labels ---
+        tk.Label(controls_frame, text=f"Long Axis: {self.long_axis_scaled:.2f} {self.scale_unit}", fg=self.LONG_AXIS_COLOR_TK).grid(row=0, column=0, sticky="w", pady=2)
         ttk.Combobox(controls_frame, textvariable=self.long_axis_texture, values=options, state="readonly").grid(row=0, column=1, sticky="ew", padx=5)
-        tk.Label(controls_frame, text=f"Short Axis: {self.short_axis_scaled:.2f} {self.scale_unit}").grid(row=1, column=0, sticky="w", pady=2)
+        
+        tk.Label(controls_frame, text=f"Short Axis: {self.short_axis_scaled:.2f} {self.scale_unit}", fg=self.SHORT_AXIS_COLOR_TK).grid(row=1, column=0, sticky="w", pady=2)
         ttk.Combobox(controls_frame, textvariable=self.short_axis_texture, values=options, state="readonly").grid(row=1, column=1, sticky="ew", padx=5)
+        # --- END MODIFIED ---
+        
         controls_frame.columnconfigure(1, weight=1)
         button_frame = tk.Frame(main_frame)
         button_frame.pack(pady=(10, 0), fill=tk.X)
         tk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
-        tk.Button(button_frame, text="Confirm", command=self.confirm, bg="#4CAF50", fg="white").pack(side=tk.RIGHT)
-    # Draws the ROI and bounding box on the canvas.
+        tk.Button(button_frame, text="Confirm", command=self.confirm, bg="#FFFFFF", fg="black").pack(side=tk.RIGHT)
+
     def draw_roi_on_canvas(self):
+        """Draws the ROI and bounding box on the canvas with distinct colors for long and short axes."""
         display_img = self.roi_img.copy()
+        # Draw the original contour in green
         cv2.drawContours(display_img, [self.roi_adjusted], -1, (0, 255, 0), 2)
-        cv2.drawContours(display_img, [np.int0(self.box_adjusted)], 0, (255, 0, 255), 2)
+
+        # --- MODIFIED: Draw bounding box sides with different colors ---
+        # Get the integer corner points of the adjusted box
+        box = np.int0(self.box_adjusted)
+        
+        # Calculate the squared distances between adjacent points to identify long/short sides
+        # Using squared distance is faster as it avoids the square root operation.
+        dist_p0_p1_sq = np.sum((box[1] - box[0])**2)
+        dist_p1_p2_sq = np.sum((box[2] - box[1])**2)
+
+        # Draw the sides based on their lengths
+        if dist_p0_p1_sq > dist_p1_p2_sq:
+            # Side (p0, p1) and its parallel side (p2, p3) are the long ones
+            cv2.line(display_img, tuple(box[0]), tuple(box[1]), self.LONG_AXIS_COLOR_BGR, 2)
+            cv2.line(display_img, tuple(box[2]), tuple(box[3]), self.LONG_AXIS_COLOR_BGR, 2)
+            # The other two are the short sides
+            cv2.line(display_img, tuple(box[1]), tuple(box[2]), self.SHORT_AXIS_COLOR_BGR, 2)
+            cv2.line(display_img, tuple(box[3]), tuple(box[0]), self.SHORT_AXIS_COLOR_BGR, 2)
+        else:
+            # Side (p1, p2) and its parallel side (p3, p0) are the long ones
+            cv2.line(display_img, tuple(box[1]), tuple(box[2]), self.LONG_AXIS_COLOR_BGR, 2)
+            cv2.line(display_img, tuple(box[3]), tuple(box[0]), self.LONG_AXIS_COLOR_BGR, 2)
+            # The other two are the short sides
+            cv2.line(display_img, tuple(box[0]), tuple(box[1]), self.SHORT_AXIS_COLOR_BGR, 2)
+            cv2.line(display_img, tuple(box[2]), tuple(box[3]), self.SHORT_AXIS_COLOR_BGR, 2)
+        # --- END MODIFIED ---
+
         img_rgb = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(img_rgb))
         self.canvas.config(width=self.photo.width(), height=self.photo.height())
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
-    # Confirms the annotation and saves the data.
+
     def confirm(self):
+        """Confirms the annotation and saves the data."""
         self.is_confirmed = True
         self.annotation_data = {
             'Long_Axis_Length': self.long_axis_scaled,
@@ -405,10 +601,12 @@ class HumanInTheLoopProcessor:
         view_menu.add_separator()
         view_menu.add_command(label="Show/Hide File Browser", command=self.toggle_file_browser)
 
-    # Shows a welcome message in the status bar.
-        # Shows a welcome message in the status bar.
     def setup_gui(self):
-        """Sets up the main GUI by creating the primary window layout and thendelegating the creation of specific components to helper methods."""
+        """
+        Sets up the main GUI by creating the primary window layout and then
+        delegating the creation of specific components to helper methods.
+        This version uses a three-pane layout.
+        """
         # --- Main Window Structure ---
         status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
@@ -418,32 +616,38 @@ class HumanInTheLoopProcessor:
         main_pane = PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
         main_pane.pack(fill=tk.BOTH, expand=True)
 
-        # --- Left Pane (for File Browser and Controls) ---
-        self.left_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
-        main_pane.add(self.left_pane, width=420)
+        # --- Create the THREE main panes ---
+        # 1. Left Pane (for all detailed controls)
+        left_controls_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
+        main_pane.add(left_controls_pane, width=420)
 
-        # --- Right Pane (for Viewer and Results) ---
-        right_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
-        main_pane.add(right_pane)
+        # 2. Middle Pane (for the viewer and results table)
+        middle_viewer_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
+        main_pane.add(middle_viewer_pane, width=800) # Give it a generous default width
+
+        # 3. Right Pane (for File Browser and Final Actions)
+        # We store this as a class attribute to allow toggling the file browser
+        self.right_tools_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
+        main_pane.add(self.right_tools_pane, width=300)
 
         # --- Populate Panes using Helper Methods ---
-        self._setup_file_browser(parent=self.left_pane)
-        self._setup_control_panel(parent=self.left_pane)
-        self._setup_viewer_and_results(parent=right_pane)
-        
+        self._setup_control_panel(parent=left_controls_pane)
+        self._setup_viewer_and_results(parent=middle_viewer_pane)
+        self._setup_file_browser(parent=self.right_tools_pane)
+        self._setup_action_panel(parent=self.right_tools_pane) # New helper for right-side buttons
+
         # Initialize default settings after GUI is built
         self.reset_hsv_defaults()
 
     def _setup_file_browser(self, parent):
         """Creates the file browser treeview and its containing frame."""
         self.file_browser_frame = tk.LabelFrame(parent, text="Image Queue", padx=5, pady=5)
-        parent.add(self.file_browser_frame, height=250)
+        parent.add(self.file_browser_frame, height=400) # Give it more height
 
         self.file_browser_tree = ttk.Treeview(self.file_browser_frame, show="tree", selectmode="browse")
         fb_vsb = ttk.Scrollbar(self.file_browser_frame, orient="vertical", command=self.file_browser_tree.yview)
         self.file_browser_tree.configure(yscrollcommand=fb_vsb.set)
 
-        # Configure tags for status colors
         self.file_browser_tree.tag_configure('current', background='#3498db', foreground='white')
         self.file_browser_tree.tag_configure('completed', background='#2ecc71', foreground='white')
         self.file_browser_tree.tag_configure('skipped', background='#f39c12', foreground='white')
@@ -453,107 +657,78 @@ class HumanInTheLoopProcessor:
         self.file_browser_tree.bind("<Double-1>", self.on_file_browser_jump)
 
     def _setup_control_panel(self, parent):
-        """Creates the entire scrollable control panel with all its widgets."""
-        # Create the boilerplate for a scrollable frame
+        """Creates the entire scrollable LEFT control panel with its widgets."""
         outer_control_frame = tk.Frame(parent, bd=2, relief=tk.SUNKEN)
         parent.add(outer_control_frame)
         
         canvas_controls = tk.Canvas(outer_control_frame, highlightthickness=0)
         scrollbar = ttk.Scrollbar(outer_control_frame, orient="vertical", command=canvas_controls.yview)
         canvas_controls.configure(yscrollcommand=scrollbar.set)
-
-        # This is the frame that will hold all the actual widgets
         control_frame = tk.Frame(canvas_controls, padx=10, pady=10)
         canvas_controls.create_window((0, 0), window=control_frame, anchor="nw")
-
-        # Binding logic to make scrolling work
         control_frame.bind("<Configure>", lambda e: canvas_controls.configure(scrollregion=canvas_controls.bbox("all")))
+        
         def on_mouse_wheel(event):
             canvas_controls.yview_scroll(int(-1*(event.delta/120)), "units")
         control_frame.bind_all("<MouseWheel>", on_mouse_wheel)
 
         scrollbar.pack(side="right", fill="y")
         canvas_controls.pack(side="left", fill="both", expand=True)
-
-        # --- Now, add all controls to the 'control_frame' ---
+        
+        # --- Add all controls to the 'control_frame' ---
         ui_font = ("Helvetica", 9, "bold")
         self.progress_label = tk.Label(control_frame, text="Progress: N/A", font=("Helvetica", 10))
         self.progress_label.pack(pady=(0, 10), anchor='w')
 
-        # --- Image Adjustments ---
-        img_adj_frame = tk.LabelFrame(control_frame, text="Image Adjustments", padx=5, pady=5, font=ui_font)
-        img_adj_frame.pack(fill=tk.X, pady=5)
+        # (The Final Action buttons are now REMOVED from this panel)
+        # ... All other control frames (Image Adjustments, HSV, ROI Tools, etc.) go here ...
+        img_adj_frame = tk.LabelFrame(control_frame, text="Image Adjustments", padx=5, pady=5, font=ui_font); img_adj_frame.pack(fill=tk.X, pady=5)
         self.contrast_value = tk.DoubleVar(value=1.0)
-        contrast_slider = Scale(img_adj_frame, from_=0.5, to=3.0, orient=tk.HORIZONTAL, resolution=0.1, label="Contrast", variable=self.contrast_value, command=self.on_slider_change)
-        contrast_slider.pack(fill=tk.X)
-
-        # --- HSV Color Thresholding ---
-        hsv_frame = tk.LabelFrame(control_frame, text="HSV Color Thresholding", padx=5, pady=5, font=ui_font)
-        hsv_frame.pack(fill=tk.X, pady=5)
-        def create_hsv_section(parent, text, hsv_type):
-            frame = tk.LabelFrame(parent, text=text, padx=5, pady=5, font=ui_font)
-            frame.pack(fill=tk.X, pady=2)
-            canvas = tk.Canvas(frame, width=300, height=20, bg='black', highlightthickness=0); canvas.pack()
-            min_slider = Scale(frame, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); min_slider.pack(fill=tk.X)
-            max_slider = Scale(frame, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); max_slider.pack(fill=tk.X)
-            return canvas, min_slider, max_slider
-        self.hue_canvas, self.h_min, self.h_max = create_hsv_section(hsv_frame, "Hue", 'h')
-        self.sat_canvas, self.s_min, self.s_max = create_hsv_section(hsv_frame, "Saturation", 's')
-        self.val_canvas, self.v_min, self.v_max = create_hsv_section(hsv_frame, "Value", 'v')
+        contrast_slider = Scale(img_adj_frame, from_=0.5, to=3.0, orient=tk.HORIZONTAL, resolution=0.1, label="Contrast", variable=self.contrast_value, command=self.on_slider_change); contrast_slider.pack(fill=tk.X)
+        hsv_frame = tk.LabelFrame(control_frame, text="HSV Color Thresholding", padx=5, pady=5, font=ui_font); hsv_frame.pack(fill=tk.X, pady=5)
+        def create_hsv_section(p, text, hsv_type):
+            f = tk.LabelFrame(p, text=text, padx=5, pady=5, font=ui_font); f.pack(fill=tk.X, pady=2)
+            c = tk.Canvas(f, width=300, height=20, bg='black', highlightthickness=0); c.pack()
+            min_s = Scale(f, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); min_s.pack(fill=tk.X)
+            max_s = Scale(f, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); max_s.pack(fill=tk.X)
+            return c, min_s, max_s
+        self.hue_canvas, self.h_min, self.h_max = create_hsv_section(hsv_frame, "Hue", 'h'); self.sat_canvas, self.s_min, self.s_max = create_hsv_section(hsv_frame, "Saturation", 's'); self.val_canvas, self.v_min, self.v_max = create_hsv_section(hsv_frame, "Value", 'v')
         self._create_hsv_bars()
-
-        # --- ROI Post-Processing ---
-        adj_frame = tk.LabelFrame(control_frame, text="ROI Post-Processing", padx=5, pady=5, font=ui_font)
-        adj_frame.pack(fill=tk.X, pady=5)
+        adj_frame = tk.LabelFrame(control_frame, text="ROI Post-Processing", padx=5, pady=5, font=ui_font); adj_frame.pack(fill=tk.X, pady=5)
         self.roi_expansion = Scale(adj_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="Expand/Shrink (px)", command=self.on_slider_change); self.roi_expansion.pack(fill=tk.X)
         self.min_area = Scale(adj_frame, from_=0, to=50000, orient=tk.HORIZONTAL, label="Min Area (px²)", command=self.on_slider_change); self.min_area.pack(fill=tk.X)
         self.max_area = Scale(adj_frame, from_=0, to=500000, orient=tk.HORIZONTAL, label="Max Area (px²)", command=self.on_slider_change); self.max_area.pack(fill=tk.X)
-
-        # --- Color Picker Tool ---
-        picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font)
-        picker_tools_frame.pack(fill=tk.X, pady=5)
+        picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font); picker_tools_frame.pack(fill=tk.X, pady=5)
         picker_grid = tk.Frame(picker_tools_frame); picker_grid.pack(fill=tk.X)
-        self.start_color_pick_btn = tk.Button(picker_grid, text="Start Color Picking", command=self.enter_color_picker_mode)
-        self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Last Pick", command=self.undo_last_color_pick)
-        self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Picking", command=self.exit_color_picker_mode)
+        self.start_color_pick_btn = tk.Button(picker_grid, text="Start Color Picking", command=self.enter_color_picker_mode); self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Last Pick", command=self.undo_last_color_pick); self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Picking", command=self.exit_color_picker_mode)
         self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew'); picker_grid.columnconfigure(0, weight=1); picker_grid.columnconfigure(1, weight=1)
-
-        # --- ROI Tools ---
-        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font)
-        roi_tools_frame.pack(fill=tk.X, pady=5)
+        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font); roi_tools_frame.pack(fill=tk.X, pady=5)
         tools_grid = tk.Frame(roi_tools_frame); tools_grid.pack(fill=tk.X)
-        self.draw_roi_btn = tk.Button(tools_grid, text="Draw New ROI", command=self.enter_drawing_mode)
-        self.finish_draw_btn = tk.Button(tools_grid, text="Finish Drawing", command=self.finalize_roi, state=tk.DISABLED, bg="#4CAF50", fg="white")
-        self.cancel_draw_btn = tk.Button(tools_grid, text="Cancel Drawing", command=self.cancel_drawing)
+        self.draw_roi_btn = tk.Button(tools_grid, text="Draw New ROI", command=self.enter_drawing_mode); self.finish_draw_btn = tk.Button(tools_grid, text="Finish Drawing", command=self.finalize_roi, state=tk.DISABLED, bg="#FFFFFF", fg="black"); self.cancel_draw_btn = tk.Button(tools_grid, text="Cancel Drawing", command=self.cancel_drawing)
         self.draw_roi_btn.grid(row=0, column=0, columnspan=2, sticky='ew'); tools_grid.columnconfigure(0, weight=1); tools_grid.columnconfigure(1, weight=1)
-
-        # --- Selected ROI Actions ---
-        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font)
-        sel_action_frame.pack(fill=tk.X, pady=5)
+        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font); sel_action_frame.pack(fill=tk.X, pady=5)
         action_grid = tk.Frame(sel_action_frame); action_grid.pack(fill=tk.X)
-        self.delete_roi_btn = tk.Button(action_grid, text="Delete Selected ROI", command=self.delete_selected_roi, state=tk.DISABLED)
-        self.delete_roi_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
-        self.annotate_roi_btn = tk.Button(action_grid, text="Annotate Selected ROI", command=self.annotate_selected_roi, state=tk.DISABLED)
-        self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0)); action_grid.columnconfigure(0, weight=1); action_grid.columnconfigure(1, weight=1)
+        self.delete_roi_btn = tk.Button(action_grid, text="Delete Selected ROI", command=self.delete_selected_roi, state=tk.DISABLED); self.delete_roi_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
+        self.annotate_roi_btn = tk.Button(action_grid, text="Annotate Selected ROI", command=self.annotate_selected_roi, state=tk.DISABLED); self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0)); action_grid.columnconfigure(0, weight=1); action_grid.columnconfigure(1, weight=1)
 
-        # --- Image Actions ---
-        action_frame = tk.LabelFrame(control_frame, text="Image Actions", padx=5, pady=5, font=ui_font)
-        action_frame.pack(fill=tk.X, pady=5, side=tk.BOTTOM)
+    def _setup_action_panel(self, parent):
+        """Creates the final action buttons on the right pane."""
+        ui_font = ("Helvetica", 9, "bold")
+        action_frame = tk.LabelFrame(parent, text="Final Actions", padx=10, pady=10, font=ui_font)
+        parent.add(action_frame) # Add to the PanedWindow
+
         tk.Button(action_frame, text="Reset HSV Controls", command=self.reset_hsv_defaults).pack(fill=tk.X, pady=2)
-        tk.Button(action_frame, text="Accept & Next (Space)", command=self.handle_accept, bg="#4CAF50", fg="black", height=2).pack(fill=tk.X, pady=2)
-        tk.Button(action_frame, text="Skip Image (S)", command=self.handle_skip, bg="#FF9800", fg="black", height=2).pack(fill=tk.X, pady=2)
+        tk.Button(action_frame, text="Accept & Next (Space)", command=self.handle_accept, bg="#4CAF50", fg="black", height=2).pack(fill=tk.X, pady=3)
+        tk.Button(action_frame, text="Skip Image (S)", command=self.handle_skip, bg="#FF9800", fg="black", height=2).pack(fill=tk.X, pady=3)
 
     def _setup_viewer_and_results(self, parent):
-        """Creates the image viewer and the live results table."""
-        # --- Image Viewer ---
+        """Creates the image viewer and the live results table in the middle pane."""
         image_frame = tk.Frame(parent, bg="gray")
         parent.add(image_frame, height=650)
         self.image_label = tk.Label(image_frame, bg="gray")
         self.image_label.pack(expand=True, fill=tk.BOTH)
         self.image_label.bind("<MouseWheel>", self.on_preview_zoom)
         self.image_label.bind("<Button-1>", self.handle_image_left_click)
-
-        # --- Live Results Table ---
         results_frame = tk.LabelFrame(parent, text="Live ROI Measurements", padx=5, pady=5)
         parent.add(results_frame, height=250)
         self.results_tree = ttk.Treeview(results_frame, show='headings')
@@ -563,6 +738,7 @@ class HumanInTheLoopProcessor:
         vsb.pack(side='right', fill='y')
         hsb.pack(side='bottom', fill='x')
         self.results_tree.pack(fill='both', expand=True)
+
 
     # Creates the HSV bars for visualizing the color thresholds.
     def _create_hsv_bars(self):
@@ -602,7 +778,7 @@ class HumanInTheLoopProcessor:
         self.v_min.set(48)
         self.v_max.set(196)
         self.min_area.set(1500)
-        self.max_area.set(80000)   # Set your desired default maximum area here
+        self.max_area.set(90000)   # Set your desired default maximum area here
         self.on_slider_change(None)
 
     # Runs the entire detection pipeline, including contrast adjustment, HSV thresholding, contour detection, and ROI post-processing.
@@ -991,13 +1167,13 @@ class HumanInTheLoopProcessor:
             self.process_next_image()
 
     def toggle_file_browser(self):
-        """Shows or hides the file browser pane."""
-        # Check if the frame is currently part of the pane's children
-        if self.file_browser_frame in self.left_pane.panes():
-            self.left_pane.forget(self.file_browser_frame)
+        """Shows or hides the file browser pane on the RIGHT side."""
+        # Check if the frame is currently part of the right pane's children
+        if self.file_browser_frame in self.right_tools_pane.panes():
+            self.right_tools_pane.forget(self.file_browser_frame)
         else:
-            # Re-add the frame at the top (index 0) using the insert method
-            self.left_pane.insert(0, self.file_browser_frame, height=250)
+            # Re-add the frame at the top (index 0) of the right pane
+            self.right_tools_pane.insert(0, self.file_browser_frame, height=400)
 
     # Undoes the last color pick, restoring the previous HSV values.    
     def undo_last_color_pick(self):
