@@ -1,10 +1,7 @@
 # Welcome to the Segmentation Analysis Labeling Program! (SALP)
 # This script is designed to help you analyze and label images with advanced object detection capabilities.
 #
-# --- VERSION 2.4 UPGRADES (from v2.3) ---
-# 1. Color Picker Tool: A new eyedropper tool to automatically set HSV thresholds by clicking on the image.
-# 2. UI for Color Picker: New buttons to start, undo, and finish color selection.
-# 3. State Management: The app now cleanly handles mutually exclusive modes (e.g., Drawing vs. Color Picking).
+# --- VERSION 3.0 
 
 # ==============================================================================
 #  IMPORTS
@@ -21,6 +18,7 @@ from PIL import Image, ImageTk
 import json
 import math
 import sys
+import traceback 
 
 # ==============================================================================
 #  HELPER FUNCTION FOR PACKAGING
@@ -370,51 +368,81 @@ class SideAnnotationWindow(Toplevel):
         self.transient(parent)
         self.is_confirmed, self.annotation_data = False, {}
 
-        self.LONG_AXIS_COLOR_BGR = (255, 0, 0)  # Blue for OpenCV (BGR)
-        self.SHORT_AXIS_COLOR_BGR = (0, 0, 255) # Red for OpenCV (BGR)
-        self.LONG_AXIS_COLOR_TK = "blue"       # Color name for Tkinter label
-        self.SHORT_AXIS_COLOR_TK = "red"       # Color name for Tkinter label
+        # --- This is the most important part for debugging ---
+        # Wrap the entire setup logic in a try-except block to catch hidden errors.
+        try:
+            self.LONG_AXIS_COLOR_BGR = (255, 0, 0)
+            self.SHORT_AXIS_COLOR_BGR = (0, 0, 255)
+            self.LONG_AXIS_COLOR_TK = "blue"
+            self.SHORT_AXIS_COLOR_TK = "red"
 
-        # Get the properties of the minimum area (rotated) rectangle
-        rect = cv2.minAreaRect(roi)
-        box_float = cv2.boxPoints(rect)
-        self.box = np.int0(box_float)
+            # --- START OF MODIFIED LOGIC from previous step ---
+            
+            # --- DEFENSIVE CHECK 1: Ensure the ROI is valid ---
+            # cv2.minAreaRect requires at least 3 points.
+            if roi is None or len(roi) < 3:
+                print("DEBUG: Invalid ROI received. It's None or has fewer than 3 points.")
+                # You might want to show a messagebox here instead of just printing
+                # from tkinter import messagebox
+                # messagebox.showerror("Error", "Cannot process an invalid or empty ROI.")
+                self.destroy() 
+                return
 
-        # Get the width and height for measurement calculations 
-        w_px, h_px = rect[1]
-        self.long_axis_px, self.short_axis_px = max(w_px, h_px), min(w_px, h_px)
-        self.long_axis_scaled = self.long_axis_px / scale_factor
-        self.short_axis_scaled = self.short_axis_px / scale_factor
-        self.scale_unit = scale_unit
-        self.long_axis_texture, self.short_axis_texture = StringVar(value="N/A"), StringVar(value="N/A")
+            print(f"DEBUG: Received ROI with shape: {roi.shape}")
+            print(f"DEBUG: Received Image with shape: {image.shape}")
 
-        #  Get the bounding box of the *rotated box's corners*.
-        x, y, w, h = cv2.boundingRect(self.box)
+            rect = cv2.minAreaRect(roi)
+            box_float = cv2.boxPoints(rect)
+            self.box = np.int_(box_float)
 
-        # Calculate padding based on the object's size.
-        #    This provides a nice "zoomed-out" view with good context.
-        #   20% of the largest dimension as padding.
-        padding = int(max(w, h) * 0.20)
+            w_px, h_px = rect[1]
+            self.long_axis_px, self.short_axis_px = max(w_px, h_px), min(w_px, h_px)
+            self.long_axis_scaled = self.long_axis_px / scale_factor
+            self.short_axis_scaled = self.short_axis_px / scale_factor
+            self.scale_unit = scale_unit
+            self.long_axis_texture, self.short_axis_texture = StringVar(value="N/A"), StringVar(value="N/A")
 
-        # Get the image slice with robust boundaries, ensuring we don't go out of the image bounds.
-        img_h, img_w = image.shape[:2]
-        x1 = max(0, x - padding)
-        y1 = max(0, y - padding)
-        x2 = min(img_w, x + w + padding)
-        y2 = min(img_h, y + h + padding)
-        self.roi_img = image[y1:y2, x1:x2]
+            x, y, w, h = cv2.boundingRect(self.box)
+            padding = int(max(w, h) * 0.20)
+            
+            print(f"DEBUG: Bounding box of rotated rect (x,y,w,h): ({x},{y},{w},{h})")
+            print(f"DEBUG: Calculated padding: {padding}")
 
-        # Adjust the coordinates of the ROI contour and the rotated box to be relative
-        #    to the new cropped image (self.roi_img).
-        self.roi_adjusted = roi - (x1, y1)
-        self.box_adjusted = self.box - (x1, y1)
+            img_h, img_w = image.shape[:2]
+            x1, y1 = max(0, x - padding), max(0, y - padding)
+            x2, y2 = min(img_w, x + w + padding), min(img_h, y + h + padding)
+            self.roi_img = image[y1:y2, x1:x2]
 
-        # --- END OF MODIFIED LOGIC ---
+            # --- DEFENSIVE CHECK 2: Ensure the crop is not empty ---
+            if self.roi_img.size == 0:
+                print(f"DEBUG: Cropping resulted in an empty image! Crop coordinates: y1:{y1}, y2:{y2}, x1:{x1}, x2:{x2}")
+                self.destroy()
+                return
+            
+            print(f"DEBUG: Cropped image shape: {self.roi_img.shape}")
 
-        self.setup_widgets()
+            self.roi_adjusted = roi - (x1, y1)
+            self.box_adjusted = self.box - (x1, y1)
 
+            # --- END OF MODIFIED LOGIC ---
+
+            self.setup_widgets()
+
+        except Exception as e:
+            # THIS WILL PRINT THE FULL ERROR TO THE CONSOLE
+            print("="*50)
+            print("AN ERROR OCCURRED IN SideAnnotationWindow __init__")
+            print(f"Error Type: {type(e).__name__}")
+            print(f"Error Message: {e}")
+            print("Full Traceback:")
+            traceback.print_exc()
+            print("="*50)
+            # Optionally destroy the blank window after showing the error
+            self.after(100, self.destroy)
+
+    # The rest of your methods (setup_widgets, draw_roi_on_canvas, etc.) go here unchanged.
     def setup_widgets(self):
-        """Sets up the GUI widgets for the annotation window."""
+        # ... (same as before) ...
         main_frame = tk.Frame(self, padx=10, pady=10)
         main_frame.pack(fill=tk.BOTH, expand=True)
         self.canvas = tk.Canvas(main_frame, bg="gray")
@@ -423,15 +451,10 @@ class SideAnnotationWindow(Toplevel):
         controls_frame = tk.Frame(main_frame)
         controls_frame.pack(fill=tk.X, expand=True)
         options = ["N/A", "Smooth", "Rough"]
-
-        # --- MODIFIED: Added 'fg' (foreground color) to labels ---
         tk.Label(controls_frame, text=f"Long Axis: {self.long_axis_scaled:.2f} {self.scale_unit}", fg=self.LONG_AXIS_COLOR_TK).grid(row=0, column=0, sticky="w", pady=2)
         ttk.Combobox(controls_frame, textvariable=self.long_axis_texture, values=options, state="readonly").grid(row=0, column=1, sticky="ew", padx=5)
-        
         tk.Label(controls_frame, text=f"Short Axis: {self.short_axis_scaled:.2f} {self.scale_unit}", fg=self.SHORT_AXIS_COLOR_TK).grid(row=1, column=0, sticky="w", pady=2)
         ttk.Combobox(controls_frame, textvariable=self.short_axis_texture, values=options, state="readonly").grid(row=1, column=1, sticky="ew", padx=5)
-        # --- END MODIFIED ---
-        
         controls_frame.columnconfigure(1, weight=1)
         button_frame = tk.Frame(main_frame)
         button_frame.pack(pady=(10, 0), fill=tk.X)
@@ -439,44 +462,29 @@ class SideAnnotationWindow(Toplevel):
         tk.Button(button_frame, text="Confirm", command=self.confirm, bg="#FFFFFF", fg="black").pack(side=tk.RIGHT)
 
     def draw_roi_on_canvas(self):
-        """Draws the ROI and bounding box on the canvas with distinct colors for long and short axes."""
+        # ... (same as before) ...
         display_img = self.roi_img.copy()
-        # Draw the original contour in green
         cv2.drawContours(display_img, [self.roi_adjusted], -1, (0, 255, 0), 2)
-
-        # --- MODIFIED: Draw bounding box sides with different colors ---
-        # Get the integer corner points of the adjusted box
-        box = np.int0(self.box_adjusted)
-        
-        # Calculate the squared distances between adjacent points to identify long/short sides
-        # Using squared distance is faster as it avoids the square root operation.
+        box = np.int_(self.box_adjusted)
         dist_p0_p1_sq = np.sum((box[1] - box[0])**2)
         dist_p1_p2_sq = np.sum((box[2] - box[1])**2)
-
-        # Draw the sides based on their lengths
         if dist_p0_p1_sq > dist_p1_p2_sq:
-            # Side (p0, p1) and its parallel side (p2, p3) are the long ones
             cv2.line(display_img, tuple(box[0]), tuple(box[1]), self.LONG_AXIS_COLOR_BGR, 2)
             cv2.line(display_img, tuple(box[2]), tuple(box[3]), self.LONG_AXIS_COLOR_BGR, 2)
-            # The other two are the short sides
             cv2.line(display_img, tuple(box[1]), tuple(box[2]), self.SHORT_AXIS_COLOR_BGR, 2)
             cv2.line(display_img, tuple(box[3]), tuple(box[0]), self.SHORT_AXIS_COLOR_BGR, 2)
         else:
-            # Side (p1, p2) and its parallel side (p3, p0) are the long ones
             cv2.line(display_img, tuple(box[1]), tuple(box[2]), self.LONG_AXIS_COLOR_BGR, 2)
             cv2.line(display_img, tuple(box[3]), tuple(box[0]), self.LONG_AXIS_COLOR_BGR, 2)
-            # The other two are the short sides
             cv2.line(display_img, tuple(box[0]), tuple(box[1]), self.SHORT_AXIS_COLOR_BGR, 2)
             cv2.line(display_img, tuple(box[2]), tuple(box[3]), self.SHORT_AXIS_COLOR_BGR, 2)
-        # --- END MODIFIED ---
-
         img_rgb = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(img_rgb))
         self.canvas.config(width=self.photo.width(), height=self.photo.height())
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
 
     def confirm(self):
-        """Confirms the annotation and saves the data."""
+        # ... (same as before) ...
         self.is_confirmed = True
         self.annotation_data = {
             'Long_Axis_Length': self.long_axis_scaled,
@@ -1228,7 +1236,7 @@ class HumanInTheLoopProcessor:
 
     #  Displays a welcome message with instructions for using the application.
     def show_welcome_message(self):
-        messagebox.showinfo("Welcome!", "Welcome to SALP v2.4!\n\n- Use the new 'Color Picker Tool' to quickly set HSV values.\n- Select input and output folders.\n- Use the controls to adjust detection.\n- Left-click an ROI to select it, then use the action buttons.")
+        messagebox.showinfo("Welcome!", "Welcome to SALP v3.0!\n\n- Use the new 'Color Picker Tool' to quickly set HSV values.\n- Select input and output folders.\n- Use the controls to adjust detection.\n- Left-click an ROI to select it, then use the action buttons.")
 
     # Prompts the user to select input and output directories, initializes the session, and loads the image list.
     def prompt_for_directories(self):
