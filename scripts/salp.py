@@ -1,7 +1,7 @@
 # Welcome to the Segmentation Analysis Labeling Program! (SALP)
 # This script is designed to help you analyze and label images with advanced object detection capabilities.
 #
-# --- VERSION 3.0 
+# --- VERSION 3.5
 
 # ==============================================================================
 #  IMPORTS
@@ -358,42 +358,29 @@ class ScaleCalibrationWindow(Toplevel):
 # ==============================================================================
 # Side Annotation Window
 # ==============================================================================
-# This window allows users to annotate the long and short axes of an object in an image, providing options for texture classification.
+
 class SideAnnotationWindow(Toplevel):
     """Provides a GUI for annotating the long and short axes of an object in an image."""
-    
+
     def __init__(self, parent, image, roi, scale_factor, scale_unit):
         super().__init__(parent)
         self.title("Annotate Sides")
         self.transient(parent)
         self.is_confirmed, self.annotation_data = False, {}
 
-        # --- This is the most important part for debugging ---
-        # Wrap the entire setup logic in a try-except block to catch hidden errors.
         try:
             self.LONG_AXIS_COLOR_BGR = (255, 0, 0)
             self.SHORT_AXIS_COLOR_BGR = (0, 0, 255)
             self.LONG_AXIS_COLOR_TK = "blue"
             self.SHORT_AXIS_COLOR_TK = "red"
 
-            # --- START OF MODIFIED LOGIC from previous step ---
-            
-            # --- DEFENSIVE CHECK 1: Ensure the ROI is valid ---
-            # cv2.minAreaRect requires at least 3 points.
             if roi is None or len(roi) < 3:
-                print("DEBUG: Invalid ROI received. It's None or has fewer than 3 points.")
-                # You might want to show a messagebox here instead of just printing
-                # from tkinter import messagebox
-                # messagebox.showerror("Error", "Cannot process an invalid or empty ROI.")
-                self.destroy() 
+                self.destroy()
                 return
-
-            print(f"DEBUG: Received ROI with shape: {roi.shape}")
-            print(f"DEBUG: Received Image with shape: {image.shape}")
 
             rect = cv2.minAreaRect(roi)
             box_float = cv2.boxPoints(rect)
-            self.box = np.int_(box_float)
+            self.box = np.int0(box_float)
 
             w_px, h_px = rect[1]
             self.long_axis_px, self.short_axis_px = max(w_px, h_px), min(w_px, h_px)
@@ -404,87 +391,91 @@ class SideAnnotationWindow(Toplevel):
 
             x, y, w, h = cv2.boundingRect(self.box)
             padding = int(max(w, h) * 0.20)
-            
-            print(f"DEBUG: Bounding box of rotated rect (x,y,w,h): ({x},{y},{w},{h})")
-            print(f"DEBUG: Calculated padding: {padding}")
-
             img_h, img_w = image.shape[:2]
             x1, y1 = max(0, x - padding), max(0, y - padding)
             x2, y2 = min(img_w, x + w + padding), min(img_h, y + h + padding)
             self.roi_img = image[y1:y2, x1:x2]
 
-            # --- DEFENSIVE CHECK 2: Ensure the crop is not empty ---
             if self.roi_img.size == 0:
-                print(f"DEBUG: Cropping resulted in an empty image! Crop coordinates: y1:{y1}, y2:{y2}, x1:{x1}, x2:{x2}")
                 self.destroy()
                 return
-            
-            print(f"DEBUG: Cropped image shape: {self.roi_img.shape}")
 
             self.roi_adjusted = roi - (x1, y1)
             self.box_adjusted = self.box - (x1, y1)
 
-            # --- END OF MODIFIED LOGIC ---
-
             self.setup_widgets()
 
         except Exception as e:
-            # THIS WILL PRINT THE FULL ERROR TO THE CONSOLE
-            print("="*50)
-            print("AN ERROR OCCURRED IN SideAnnotationWindow __init__")
-            print(f"Error Type: {type(e).__name__}")
-            print(f"Error Message: {e}")
-            print("Full Traceback:")
             traceback.print_exc()
-            print("="*50)
-            # Optionally destroy the blank window after showing the error
             self.after(100, self.destroy)
 
-    # The rest of your methods (setup_widgets, draw_roi_on_canvas, etc.) go here unchanged.
     def setup_widgets(self):
-        # ... (same as before) ...
-        main_frame = tk.Frame(self, padx=10, pady=10)
+        """Sets up the original, simple widget layout."""
+        main_frame = ttk.Frame(self, padding="10 10 10 10")
         main_frame.pack(fill=tk.BOTH, expand=True)
+
         self.canvas = tk.Canvas(main_frame, bg="gray")
         self.canvas.pack(pady=5)
-        self.draw_roi_on_canvas()
-        controls_frame = tk.Frame(main_frame)
-        controls_frame.pack(fill=tk.X, expand=True)
+        self.draw_roi_on_canvas() # This method is now modified
+
+        controls_frame = ttk.Frame(main_frame)
+        controls_frame.pack(fill=tk.X, expand=True, pady=5)
         options = ["N/A", "Smooth", "Rough"]
-        tk.Label(controls_frame, text=f"Long Axis: {self.long_axis_scaled:.2f} {self.scale_unit}", fg=self.LONG_AXIS_COLOR_TK).grid(row=0, column=0, sticky="w", pady=2)
+        
+        ttk.Label(controls_frame, text=f"Long Axis: {self.long_axis_scaled:.2f} {self.scale_unit}", foreground=self.LONG_AXIS_COLOR_TK).grid(row=0, column=0, sticky="w", pady=2)
         ttk.Combobox(controls_frame, textvariable=self.long_axis_texture, values=options, state="readonly").grid(row=0, column=1, sticky="ew", padx=5)
-        tk.Label(controls_frame, text=f"Short Axis: {self.short_axis_scaled:.2f} {self.scale_unit}", fg=self.SHORT_AXIS_COLOR_TK).grid(row=1, column=0, sticky="w", pady=2)
+        
+        ttk.Label(controls_frame, text=f"Short Axis: {self.short_axis_scaled:.2f} {self.scale_unit}", foreground=self.SHORT_AXIS_COLOR_TK).grid(row=1, column=0, sticky="w", pady=2)
         ttk.Combobox(controls_frame, textvariable=self.short_axis_texture, values=options, state="readonly").grid(row=1, column=1, sticky="ew", padx=5)
+        
         controls_frame.columnconfigure(1, weight=1)
-        button_frame = tk.Frame(main_frame)
-        button_frame.pack(pady=(10, 0), fill=tk.X)
-        tk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
-        tk.Button(button_frame, text="Confirm", command=self.confirm, bg="#FFFFFF", fg="black").pack(side=tk.RIGHT)
+
+        button_frame = ttk.Frame(main_frame)
+        button_frame.pack(pady=(10, 0), fill=tk.X, side=tk.BOTTOM)
+        ttk.Button(button_frame, text="Cancel", command=self.destroy).pack(side=tk.RIGHT, padx=5)
+        ttk.Button(button_frame, text="Confirm", command=self.confirm).pack(side=tk.RIGHT)
 
     def draw_roi_on_canvas(self):
-        # ... (same as before) ...
+        """Draws the image and adds CLICKABLE canvas lines for the axes."""
         display_img = self.roi_img.copy()
         cv2.drawContours(display_img, [self.roi_adjusted], -1, (0, 255, 0), 2)
-        box = np.int_(self.box_adjusted)
-        dist_p0_p1_sq = np.sum((box[1] - box[0])**2)
-        dist_p1_p2_sq = np.sum((box[2] - box[1])**2)
-        if dist_p0_p1_sq > dist_p1_p2_sq:
-            cv2.line(display_img, tuple(box[0]), tuple(box[1]), self.LONG_AXIS_COLOR_BGR, 2)
-            cv2.line(display_img, tuple(box[2]), tuple(box[3]), self.LONG_AXIS_COLOR_BGR, 2)
-            cv2.line(display_img, tuple(box[1]), tuple(box[2]), self.SHORT_AXIS_COLOR_BGR, 2)
-            cv2.line(display_img, tuple(box[3]), tuple(box[0]), self.SHORT_AXIS_COLOR_BGR, 2)
-        else:
-            cv2.line(display_img, tuple(box[1]), tuple(box[2]), self.LONG_AXIS_COLOR_BGR, 2)
-            cv2.line(display_img, tuple(box[3]), tuple(box[0]), self.LONG_AXIS_COLOR_BGR, 2)
-            cv2.line(display_img, tuple(box[0]), tuple(box[1]), self.SHORT_AXIS_COLOR_BGR, 2)
-            cv2.line(display_img, tuple(box[2]), tuple(box[3]), self.SHORT_AXIS_COLOR_BGR, 2)
         img_rgb = cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB)
         self.photo = ImageTk.PhotoImage(image=Image.fromarray(img_rgb))
+        
         self.canvas.config(width=self.photo.width(), height=self.photo.height())
         self.canvas.create_image(0, 0, anchor=tk.NW, image=self.photo)
 
+        box = self.box_adjusted
+        dist_p0_p1_sq = np.sum((box[1] - box[0])**2)
+        dist_p1_p2_sq = np.sum((box[2] - box[1])**2)
+
+        if dist_p0_p1_sq > dist_p1_p2_sq:
+            long_lines = [(tuple(box[0]), tuple(box[1])), (tuple(box[2]), tuple(box[3]))]
+            short_lines = [(tuple(box[1]), tuple(box[2])), (tuple(box[3]), tuple(box[0]))]
+        else:
+            long_lines = [(tuple(box[1]), tuple(box[2])), (tuple(box[3]), tuple(box[0]))]
+            short_lines = [(tuple(box[0]), tuple(box[1])), (tuple(box[2]), tuple(box[3]))]
+
+        for p1, p2 in long_lines:
+            self.canvas.create_line(p1, p2, fill=self.LONG_AXIS_COLOR_TK, width=3, tags=("axis_line", "long_axis_line"))
+        for p1, p2 in short_lines:
+            self.canvas.create_line(p1, p2, fill=self.SHORT_AXIS_COLOR_TK, width=3, tags=("axis_line", "short_axis_line"))
+        
+        # This makes the lines clickable!
+        self.canvas.tag_bind("axis_line", "<Button-1>", self.on_line_click)
+
+    def on_line_click(self, event):
+        """This function runs when you click a red or blue line."""
+        item_id = self.canvas.find_closest(event.x, event.y)[0]
+        tags = self.canvas.gettags(item_id)
+        if "long_axis_line" in tags:
+            print("Annotation Window: Long axis line clicked. Main app should now handle editing/deleting.")
+            # Here you could call a function in your main app if needed
+            # e.g., self.master.handle_roi_edit_request(self.roi_id)
+        elif "short_axis_line" in tags:
+            print("Annotation Window: Short axis line clicked. Main app should now handle editing/deleting.")
+
     def confirm(self):
-        # ... (same as before) ...
         self.is_confirmed = True
         self.annotation_data = {
             'Long_Axis_Length': self.long_axis_scaled,
@@ -493,11 +484,6 @@ class SideAnnotationWindow(Toplevel):
             'Short_Axis_Texture': self.short_axis_texture.get()
         }
         self.destroy()
-
-# ==============================================================================
-#  Main Application Class
-# ==============================================================================
-# This class manages the main application window, image processing, and user interactions.
 class HumanInTheLoopProcessor:
     # Initializes the main application with the root window and sets up the GUI.
     def __init__(self, root_window):
@@ -509,7 +495,7 @@ class HumanInTheLoopProcessor:
             self.root.iconbitmap(icon_path)
         except Exception as e:
             print(f"Icon not found (app_icon.ico), skipping: {e}")
-        self.root.geometry("1450x950") # Increased width for new controls
+        self.root.geometry("1450x950")
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.input_dir, self.output_dir = "", ""
         self.image_paths, self.output_subdirs = [], {}
@@ -518,6 +504,8 @@ class HumanInTheLoopProcessor:
         self.manual_annotations = {}
 
         # --- Image Processing State Variables ---
+        self.panning_active = False
+        self.canvas_image_id = None
         self.scale_factor, self.scale_unit = 1.0, "px"
         self.original_image, self.processed_image, self.final_rois = None, None, []
         self.preview_zoom_factor = 1.0
@@ -525,27 +513,41 @@ class HumanInTheLoopProcessor:
         self.selected_roi_index = -1
         self.drawing_mode = False
         self.new_roi_points = []
-        self.contrast_value = None # For contrast slider
+        self.contrast_value = None
 
-        ### NEW FEATURE: Color Picker State Variables
+        # -- Pan and Zoom State Variables ---
+        self.pan_offset_x = 0
+        self.pan_offset_y = 0
+        self.canvas_image_id = None
+        self.drag_start_x = 0
+        self.drag_start_y = 0
+        self.panning_active = False 
+
+        ### MODIFICATION ### - New variable for the ROI slider
+        self.roi_expansion_var = None # Will be a tk.DoubleVar
+
+        ### MODIFICATION ### - New state for HSV visibility
+        self.hsv_section_visible = False
+
+        # --- Color Picker State ---
         self.color_picker_active = False
-        self.color_picker_history = [] # To store slider states for the undo function
+        self.color_picker_history = []
 
         # --- GUI Element Variables ---
+        self.roi_expansion_label = None        
         self.mask_window, self.mask_label, self.results_tree, self.image_label = None, None, None, None
-                ### FILE BROWSER FEATURE: GUI and State Variables ###
-        self.file_browser_frame = None
-        self.file_browser_tree = None
-        self.left_pane = None
+        self.file_browser_frame, self.file_browser_tree, self.left_pane = None, None, None
         self.delete_roi_btn, self.annotate_roi_btn = None, None
         self.draw_roi_btn, self.finish_draw_btn, self.cancel_draw_btn = None, None, None
         self.status_label = None
-        ### NEW FEATURE: Color Picker Buttons
         self.start_color_pick_btn, self.undo_color_pick_btn, self.finish_color_pick_btn = None, None, None
         
+        ### MODIFICATION ### - Variable to hold the HSV frame itself
+        self.hsv_frame = None
+
         # --- Application Startup Sequence ---
         self.setup_menu()
-        self.setup_gui()
+        self.setup_gui() # This will now set up the new UI
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         self.root.bind("<space>", self.handle_accept)
         self.root.bind("<Key-s>", self.handle_skip); self.root.bind("<Key-S>", self.handle_skip)
@@ -556,11 +558,9 @@ class HumanInTheLoopProcessor:
             self.start_calibration_or_processing()
         else:
             self.root.destroy()
-
-    # Prompts the user to select input and output directories for image processing.
+            
+    # ... (Keep start_calibration_or_processing, setup_results_table, and setup_menu methods EXACTLY as they are) ...
     def start_calibration_or_processing(self):
-
-        # Prompts the user to set a physical scale for measurements.
         if not self.image_paths: return
         if messagebox.askyesno("Set Scale", "Do you want to set a physical scale for your measurements?\n\n(If you choose 'No', all measurements will be in pixels.)"):
             calib_image = cv2.imread(self.image_paths[0])
@@ -574,150 +574,145 @@ class HumanInTheLoopProcessor:
                     messagebox.showwarning("Calibration Canceled", "No scale was set. Measurements will be in pixels.")
             else:
                 messagebox.showerror("Error", f"Failed to load first image for calibration:\n{self.image_paths[0]}")
-        
         self.setup_results_table()
         self.update_live_results_columns()
         self.process_next_image()
 
     def setup_results_table(self):
-        # Initializes the results DataFrame with appropriate columns.
-        ### RECALIBRATE FEATURE: Refactored column names for robustness ###
-        columns = [
-            'Session_ID', 'Image_Number', 'Filename', 'ROI_ID', 'Measurement_Unit',
-            'Centroid_X_px', 'Centroid_Y_px', 'Area', 'Perimeter', 'Equivalent_Diameter',
-            'Aspect_Ratio', 'Circularity_Ratio', 'Solidity_Ratio', 'Orientation_Angle',
-            'Long_Axis_Length', 'Short_Axis_Length', 'Long_Axis_Texture', 'Short_Axis_Texture'
-        ]
+        columns = ['Session_ID', 'Image_Number', 'Filename', 'ROI_ID', 'Measurement_Unit', 'Centroid_X_px', 'Centroid_Y_px', 'Area', 'Perimeter', 'Equivalent_Diameter', 'Aspect_Ratio', 'Circularity_Ratio', 'Solidity_Ratio', 'Orientation_Angle', 'Long_Axis_Length', 'Short_Axis_Length', 'Long_Axis_Texture', 'Short_Axis_Texture']
         self.results_df = pd.DataFrame(columns=columns)
     
-    # Sets up the application menu with options for saving/loading settings and toggling the mask preview.
     def setup_menu(self):
-        menubar = Menu(self.root)
-        self.root.config(menu=menubar)
-        file_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="File", menu=file_menu)
-        file_menu.add_command(label="Recalibrate Scale...", command=self.recalibrate_scale)
-        file_menu.add_separator()
-        file_menu.add_command(label="Save Settings...", command=self.save_settings)
-        file_menu.add_command(label="Load Settings...", command=self.load_settings)
-        file_menu.add_separator()
+        menubar = Menu(self.root); self.root.config(menu=menubar)
+        file_menu = Menu(menubar, tearoff=0); menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Recalibrate Scale...", command=self.recalibrate_scale); file_menu.add_separator()
+        file_menu.add_command(label="Save Settings...", command=self.save_settings); file_menu.add_command(label="Load Settings...", command=self.load_settings); file_menu.add_separator()
         file_menu.add_command(label="Exit", command=self.on_closing)
-        view_menu = Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="View", menu=view_menu)
-        view_menu.add_command(label="Toggle Live Mask Preview", command=self.toggle_mask_window)
-        ### FILE BROWSER FEATURE: Add toggle menu item ###
-        view_menu.add_separator()
+        view_menu = Menu(menubar, tearoff=0); menubar.add_cascade(label="View", menu=view_menu)
+        view_menu.add_command(label="Toggle Live Mask Preview", command=self.toggle_mask_window); view_menu.add_separator()
         view_menu.add_command(label="Show/Hide File Browser", command=self.toggle_file_browser)
 
+
     def setup_gui(self):
-        """
-        Sets up the main GUI by creating the primary window layout and then
-        delegating the creation of specific components to helper methods.
-        This version uses a three-pane layout.
-        """
-        # --- Main Window Structure ---
-        status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1)
-        status_frame.pack(side=tk.BOTTOM, fill=tk.X)
-        self.status_label = tk.Label(status_frame, text="Ready.", anchor='w', padx=5, pady=3)
-        self.status_label.pack(fill=tk.X)
-
-        main_pane = PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED)
-        main_pane.pack(fill=tk.BOTH, expand=True)
-
-        # --- Create the THREE main panes ---
-        # 1. Left Pane (for all detailed controls)
-        left_controls_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
-        main_pane.add(left_controls_pane, width=420)
-
-        # 2. Middle Pane (for the viewer and results table)
-        middle_viewer_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
-        main_pane.add(middle_viewer_pane, width=800) # Give it a generous default width
-
-        # 3. Right Pane (for File Browser and Final Actions)
-        # We store this as a class attribute to allow toggling the file browser
-        self.right_tools_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED)
-        main_pane.add(self.right_tools_pane, width=300)
-
-        # --- Populate Panes using Helper Methods ---
+        status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1); status_frame.pack(side=tk.BOTTOM, fill=tk.X)
+        self.status_label = tk.Label(status_frame, text="Ready.", anchor='w', padx=5, pady=3); self.status_label.pack(fill=tk.X)
+        main_pane = PanedWindow(self.root, orient=tk.HORIZONTAL, sashrelief=tk.RAISED); main_pane.pack(fill=tk.BOTH, expand=True)
+        left_controls_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED); main_pane.add(left_controls_pane, width=420)
+        middle_viewer_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED); main_pane.add(middle_viewer_pane, width=800)
+        self.right_tools_pane = PanedWindow(main_pane, orient=tk.VERTICAL, sashrelief=tk.RAISED); main_pane.add(self.right_tools_pane, width=300)
         self._setup_control_panel(parent=left_controls_pane)
         self._setup_viewer_and_results(parent=middle_viewer_pane)
         self._setup_file_browser(parent=self.right_tools_pane)
-        self._setup_action_panel(parent=self.right_tools_pane) # New helper for right-side buttons
-
-        # Initialize default settings after GUI is built
+        self._setup_action_panel(parent=self.right_tools_pane)
         self.reset_hsv_defaults()
 
     def _setup_file_browser(self, parent):
-        """Creates the file browser treeview and its containing frame."""
         self.file_browser_frame = tk.LabelFrame(parent, text="Image Queue", padx=5, pady=5)
-        parent.add(self.file_browser_frame, height=400) # Give it more height
-
+        parent.add(self.file_browser_frame, height=400)
         self.file_browser_tree = ttk.Treeview(self.file_browser_frame, show="tree", selectmode="browse")
         fb_vsb = ttk.Scrollbar(self.file_browser_frame, orient="vertical", command=self.file_browser_tree.yview)
         self.file_browser_tree.configure(yscrollcommand=fb_vsb.set)
-
         self.file_browser_tree.tag_configure('current', background='#3498db', foreground='white')
         self.file_browser_tree.tag_configure('completed', background='#2ecc71', foreground='white')
         self.file_browser_tree.tag_configure('skipped', background='#f39c12', foreground='white')
-
         fb_vsb.pack(side='right', fill='y')
         self.file_browser_tree.pack(fill='both', expand=True)
         self.file_browser_tree.bind("<Double-1>", self.on_file_browser_jump)
 
     def _setup_control_panel(self, parent):
         """Creates the entire scrollable LEFT control panel with its widgets."""
+        # --- Boilerplate for scrollable frame ---
         outer_control_frame = tk.Frame(parent, bd=2, relief=tk.SUNKEN)
         parent.add(outer_control_frame)
-        
         canvas_controls = tk.Canvas(outer_control_frame, highlightthickness=0)
         scrollbar = ttk.Scrollbar(outer_control_frame, orient="vertical", command=canvas_controls.yview)
         canvas_controls.configure(yscrollcommand=scrollbar.set)
         control_frame = tk.Frame(canvas_controls, padx=10, pady=10)
         canvas_controls.create_window((0, 0), window=control_frame, anchor="nw")
         control_frame.bind("<Configure>", lambda e: canvas_controls.configure(scrollregion=canvas_controls.bbox("all")))
-        
         def on_mouse_wheel(event):
             canvas_controls.yview_scroll(int(-1*(event.delta/120)), "units")
         control_frame.bind_all("<MouseWheel>", on_mouse_wheel)
-
         scrollbar.pack(side="right", fill="y")
         canvas_controls.pack(side="left", fill="both", expand=True)
-        
+
         # --- Add all controls to the 'control_frame' ---
         ui_font = ("Helvetica", 9, "bold")
         self.progress_label = tk.Label(control_frame, text="Progress: N/A", font=("Helvetica", 10))
         self.progress_label.pack(pady=(0, 10), anchor='w')
 
-        # (The Final Action buttons are now REMOVED from this panel)
-        # ... All other control frames (Image Adjustments, HSV, ROI Tools, etc.) go here ...
-        img_adj_frame = tk.LabelFrame(control_frame, text="Image Adjustments", padx=5, pady=5, font=ui_font); img_adj_frame.pack(fill=tk.X, pady=5)
+        img_adj_frame = tk.LabelFrame(control_frame, text="Image Adjustments", padx=5, pady=5, font=ui_font)
+        img_adj_frame.pack(fill=tk.X, pady=5)
         self.contrast_value = tk.DoubleVar(value=1.0)
-        contrast_slider = Scale(img_adj_frame, from_=0.5, to=3.0, orient=tk.HORIZONTAL, resolution=0.1, label="Contrast", variable=self.contrast_value, command=self.on_slider_change); contrast_slider.pack(fill=tk.X)
-        hsv_frame = tk.LabelFrame(control_frame, text="HSV Color Thresholding", padx=5, pady=5, font=ui_font); hsv_frame.pack(fill=tk.X, pady=5)
+        tk.Scale(img_adj_frame, from_=0.5, to=3.0, orient=tk.HORIZONTAL, resolution=0.1, label="Contrast", variable=self.contrast_value, command=self.on_slider_change).pack(fill=tk.X)
+
+        self.hsv_frame = tk.LabelFrame(control_frame, text="HSV Color Thresholding", padx=5, pady=5, font=ui_font)
         def create_hsv_section(p, text, hsv_type):
             f = tk.LabelFrame(p, text=text, padx=5, pady=5, font=ui_font); f.pack(fill=tk.X, pady=2)
             c = tk.Canvas(f, width=300, height=20, bg='black', highlightthickness=0); c.pack()
-            min_s = Scale(f, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); min_s.pack(fill=tk.X)
-            max_s = Scale(f, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); max_s.pack(fill=tk.X)
+            min_s = tk.Scale(f, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); min_s.pack(fill=tk.X)
+            max_s = tk.Scale(f, from_=0, to=179 if hsv_type=='h' else 255, orient=tk.HORIZONTAL, showvalue=1, command=self.on_slider_change); max_s.pack(fill=tk.X)
             return c, min_s, max_s
-        self.hue_canvas, self.h_min, self.h_max = create_hsv_section(hsv_frame, "Hue", 'h'); self.sat_canvas, self.s_min, self.s_max = create_hsv_section(hsv_frame, "Saturation", 's'); self.val_canvas, self.v_min, self.v_max = create_hsv_section(hsv_frame, "Value", 'v')
+        self.hue_canvas, self.h_min, self.h_max = create_hsv_section(self.hsv_frame, "Hue", 'h')
+        self.sat_canvas, self.s_min, self.s_max = create_hsv_section(self.hsv_frame, "Saturation", 's')
+        self.val_canvas, self.v_min, self.v_max = create_hsv_section(self.hsv_frame, "Value", 'v')
         self._create_hsv_bars()
-        adj_frame = tk.LabelFrame(control_frame, text="ROI Post-Processing", padx=5, pady=5, font=ui_font); adj_frame.pack(fill=tk.X, pady=5)
-        self.roi_expansion = Scale(adj_frame, from_=-50, to=50, orient=tk.HORIZONTAL, label="Expand/Shrink (px)", command=self.on_slider_change); self.roi_expansion.pack(fill=tk.X)
-        self.min_area = Scale(adj_frame, from_=0, to=50000, orient=tk.HORIZONTAL, label="Min Area (px²)", command=self.on_slider_change); self.min_area.pack(fill=tk.X)
-        self.max_area = Scale(adj_frame, from_=0, to=500000, orient=tk.HORIZONTAL, label="Max Area (px²)", command=self.on_slider_change); self.max_area.pack(fill=tk.X)
-        picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font); picker_tools_frame.pack(fill=tk.X, pady=5)
-        picker_grid = tk.Frame(picker_tools_frame); picker_grid.pack(fill=tk.X)
-        self.start_color_pick_btn = tk.Button(picker_grid, text="Start Color Picking", command=self.enter_color_picker_mode); self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Last Pick", command=self.undo_last_color_pick); self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Picking", command=self.exit_color_picker_mode)
-        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew'); picker_grid.columnconfigure(0, weight=1); picker_grid.columnconfigure(1, weight=1)
-        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font); roi_tools_frame.pack(fill=tk.X, pady=5)
-        tools_grid = tk.Frame(roi_tools_frame); tools_grid.pack(fill=tk.X)
-        self.draw_roi_btn = tk.Button(tools_grid, text="Draw New ROI", command=self.enter_drawing_mode); self.finish_draw_btn = tk.Button(tools_grid, text="Finish Drawing", command=self.finalize_roi, state=tk.DISABLED, bg="#FFFFFF", fg="black"); self.cancel_draw_btn = tk.Button(tools_grid, text="Cancel Drawing", command=self.cancel_drawing)
-        self.draw_roi_btn.grid(row=0, column=0, columnspan=2, sticky='ew'); tools_grid.columnconfigure(0, weight=1); tools_grid.columnconfigure(1, weight=1)
-        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font); sel_action_frame.pack(fill=tk.X, pady=5)
-        action_grid = tk.Frame(sel_action_frame); action_grid.pack(fill=tk.X)
-        self.delete_roi_btn = tk.Button(action_grid, text="Delete Selected ROI", command=self.delete_selected_roi, state=tk.DISABLED); self.delete_roi_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
-        self.annotate_roi_btn = tk.Button(action_grid, text="Annotate Selected ROI", command=self.annotate_selected_roi, state=tk.DISABLED); self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0)); action_grid.columnconfigure(0, weight=1); action_grid.columnconfigure(1, weight=1)
+        
+        # Use self.adj_frame to make the HSV toggle robust
+        self.adj_frame = tk.LabelFrame(control_frame, text="ROI Post-Processing", padx=5, pady=5, font=ui_font)
+        self.adj_frame.pack(fill=tk.X, pady=5)
+
+        self.roi_expansion_var = tk.DoubleVar(value=0)
+        tk.Label(self.adj_frame, text="Expand/Shrink (px):").pack(anchor='w')
+        roi_slider_frame = tk.Frame(self.adj_frame)
+        roi_slider_frame.pack(fill=tk.X, expand=True)
+        tk.Button(roi_slider_frame, text="-", width=3, command=lambda: self._adjust_roi_value(-1)).pack(side=tk.LEFT, padx=(0, 2))
+        tk.Scale(roi_slider_frame, from_=-100, to=100, orient=tk.HORIZONTAL, showvalue=0, resolution=1, variable=self.roi_expansion_var, command=self.on_slider_change).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        tk.Button(roi_slider_frame, text="+", width=3, command=lambda: self._adjust_roi_value(1)).pack(side=tk.LEFT, padx=(2, 5))
+        self.roi_expansion_label = tk.Label(roi_slider_frame, text="0", width=4, font=("Helvetica", 9, "bold"))
+        self.roi_expansion_label.pack(side=tk.LEFT)
+        def _update_roi_label(*args):
+            self.roi_expansion_label.config(text=f"{int(self.roi_expansion_var.get())}")
+        self.roi_expansion_var.trace_add("write", _update_roi_label)
+
+        self.min_area = tk.Scale(self.adj_frame, from_=0, to=50000, orient=tk.HORIZONTAL, label="Min Area (px²)", command=self.on_slider_change)
+        self.min_area.pack(fill=tk.X)
+        self.max_area = tk.Scale(self.adj_frame, from_=0, to=500000, orient=tk.HORIZONTAL, label="Max Area (px²)", command=self.on_slider_change)
+        self.max_area.pack(fill=tk.X)
+
+        picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font)
+        picker_tools_frame.pack(fill=tk.X, pady=5)
+        tk.Button(picker_tools_frame, text="Show/Hide HSV Controls", command=self.toggle_hsv_section).pack(fill=tk.X, pady=(0, 5))
+        picker_grid = tk.Frame(picker_tools_frame)
+        picker_grid.pack(fill=tk.X)
+        self.start_color_pick_btn = tk.Button(picker_grid, text="Start Color Picking", command=self.enter_color_picker_mode)
+        self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Last Pick", command=self.undo_last_color_pick)
+        self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Picking", command=self.exit_color_picker_mode)
+        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
+        picker_grid.columnconfigure(0, weight=1)
+        picker_grid.columnconfigure(1, weight=1)
+
+        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font)
+        roi_tools_frame.pack(fill=tk.X, pady=5)
+        tools_grid = tk.Frame(roi_tools_frame)
+        tools_grid.pack(fill=tk.X)
+        self.draw_roi_btn = tk.Button(tools_grid, text="Draw New ROI", command=self.enter_drawing_mode)
+        self.finish_draw_btn = tk.Button(tools_grid, text="Finish Drawing", command=self.finalize_roi, state=tk.DISABLED, bg="#FFFFFF", fg="black")
+        self.cancel_draw_btn = tk.Button(tools_grid, text="Cancel Drawing", command=self.cancel_drawing)
+        self.draw_roi_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
+        tools_grid.columnconfigure(0, weight=1)
+        tools_grid.columnconfigure(1, weight=1)
+
+        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font)
+        sel_action_frame.pack(fill=tk.X, pady=5)
+        action_grid = tk.Frame(sel_action_frame)
+        action_grid.pack(fill=tk.X)
+        self.delete_roi_btn = tk.Button(action_grid, text="Delete Selected ROI", command=self.delete_selected_roi, state=tk.DISABLED)
+        self.delete_roi_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
+        self.annotate_roi_btn = tk.Button(action_grid, text="Annotate Selected ROI", command=self.annotate_selected_roi, state=tk.DISABLED)
+        self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0))
+        action_grid.columnconfigure(0, weight=1)
+        action_grid.columnconfigure(1, weight=1)
 
     def _setup_action_panel(self, parent):
         """Creates the final action buttons on the right pane."""
@@ -728,27 +723,101 @@ class HumanInTheLoopProcessor:
         tk.Button(action_frame, text="Reset HSV Controls", command=self.reset_hsv_defaults).pack(fill=tk.X, pady=2)
         tk.Button(action_frame, text="Accept & Next (Space)", command=self.handle_accept, bg="#4CAF50", fg="black", height=2).pack(fill=tk.X, pady=3)
         tk.Button(action_frame, text="Skip Image (S)", command=self.handle_skip, bg="#FF9800", fg="black", height=2).pack(fill=tk.X, pady=3)
-
+        
     def _setup_viewer_and_results(self, parent):
         """Creates the image viewer and the live results table in the middle pane."""
+        
+        # --- Part 1: Image Viewer ---
         image_frame = tk.Frame(parent, bg="gray")
         parent.add(image_frame, height=650)
-        self.image_label = tk.Label(image_frame, bg="gray")
+        
+        # --- THIS IS THE CRUCIAL ORDER ---
+        # 1. CREATE the widget first and assign it to the instance variable.
+        self.image_label = tk.Canvas(image_frame, bg="gray", highlightthickness=0)
         self.image_label.pack(expand=True, fill=tk.BOTH)
+
+        # 2. NOW that self.image_label exists, it is SAFE to bind events to it.
+        # Event for zooming
         self.image_label.bind("<MouseWheel>", self.on_preview_zoom)
-        self.image_label.bind("<Button-1>", self.handle_image_left_click)
+        
+        # Events for ROI selection and Shift + Drag Panning
+        self.image_label.bind("<ButtonPress-1>", self.handle_image_left_click)
+        self.image_label.bind("<B1-Motion>", self.on_pan_drag)
+        self.image_label.bind("<ButtonRelease-1>", self.on_pan_end)
+
+        # We also bind the Shift key release to the whole app window to ensure
+        # the pan ends correctly even if the cursor leaves the image label.
+        self.root.bind("<KeyRelease-Shift_L>", self.on_pan_end)
+        self.root.bind("<KeyRelease-Shift_R>", self.on_pan_end)
+        # --- END OF CRUCIAL ORDER ---
+
+        # --- Part 2: Results Table ---
         results_frame = tk.LabelFrame(parent, text="Live ROI Measurements", padx=5, pady=5)
         parent.add(results_frame, height=250)
+        
         self.results_tree = ttk.Treeview(results_frame, show='headings')
         vsb = ttk.Scrollbar(results_frame, orient="vertical", command=self.results_tree.yview)
         hsb = ttk.Scrollbar(results_frame, orient="horizontal", command=self.results_tree.xview)
         self.results_tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        
         vsb.pack(side='right', fill='y')
         hsb.pack(side='bottom', fill='x')
         self.results_tree.pack(fill='both', expand=True)
 
+        # Bind the click event for selecting ROIs from the table
+        self.results_tree.bind("<<TreeviewSelect>>", self.on_results_tree_select)
 
-    # Creates the HSV bars for visualizing the color thresholds.
+    ### MODIFICATION GOAL 1: New helper method to toggle HSV section ###
+    def toggle_hsv_section(self):
+        """Shows or hides the HSV adjustment sliders."""
+        if self.hsv_section_visible:
+            self.hsv_frame.pack_forget() # Hide the frame
+        else:
+            # Show the frame by packing it just before the ROI Post-Processing frame
+            self.hsv_frame.pack(fill=tk.X, pady=5, before=self.hsv_frame.master.children['!labelframe3'])
+        self.hsv_section_visible = not self.hsv_section_visible
+
+    ### MODIFICATION GOAL 2: New helper method for the ROI adjustment buttons ###
+    def _adjust_roi_value(self, step):
+        """Changes the ROI expansion slider value by a single increment."""
+        current_value = self.roi_expansion_var.get()
+        new_value = current_value + step
+        # Clamp the value between the slider's limits (-100 to 100)
+        if -100 <= new_value <= 100:
+            self.roi_expansion_var.set(new_value)
+            self.on_slider_change(None) # Manually trigger update
+
+    ### MODIFICATION GOAL 3: New helper method to handle clicks on the results table ###
+    def on_results_tree_select(self, event):
+        """Callback when a row in the live results table is clicked."""
+        selected_item = self.results_tree.selection()
+        if not selected_item:
+            return # User clicked on header or empty space
+
+        item_values = self.results_tree.item(selected_item, "values")
+        if not item_values:
+            return
+
+        try:
+            # Assuming 'ROI_ID' is the 4th column (index 3)
+            # Find the index of the 'ROI_ID' column to be safe
+            col_index = self.results_tree['columns'].index('ROI_ID')
+            roi_id_str = item_values[col_index] # e.g., "ROI_1"
+            # Extract the number and convert to a zero-based index
+            roi_index = int(roi_id_str.split('_')[1]) - 1
+
+            if 0 <= roi_index < len(self.final_rois):
+                self.selected_roi_index = roi_index
+                self.update_image_display() # Redraw image to show new selection
+                self.update_roi_action_buttons()
+        except (ValueError, IndexError) as e:
+            print(f"Could not parse ROI ID from table: {item_values}. Error: {e}")
+
+
+    # ... (The rest of your class methods should remain largely unchanged) ...
+    # Make sure to keep _create_hsv_bars, _update_hsv_bars, and reset_hsv_defaults
+    # as they are essential for the HSV sliders to function.
+
     def _create_hsv_bars(self):
         hue_bar = np.zeros((1, 180, 3), dtype=np.uint8); hue_bar[0, :, 0] = np.arange(180); hue_bar[0, :, 1] = 255; hue_bar[0, :, 2] = 255
         self.hue_img = ImageTk.PhotoImage(image=Image.fromarray(cv2.resize(cv2.cvtColor(hue_bar, cv2.COLOR_HSV2RGB), (300, 20), interpolation=cv2.INTER_NEAREST)))
@@ -766,7 +835,6 @@ class HumanInTheLoopProcessor:
         self.val_overlay1 = self.val_canvas.create_rectangle(0,0,0,20, fill='white', stipple='gray50', outline="")
         self.val_overlay2 = self.val_canvas.create_rectangle(0,0,0,20, fill='white', stipple='gray50', outline="")
         
-    # Updates the HSV overlay bars based on current slider values
     def _update_hsv_bars(self):
         w, h = 300, 20
         h_min_pos = self.h_min.get()/179*w; h_max_pos = self.h_max.get()/179*w
@@ -776,49 +844,61 @@ class HumanInTheLoopProcessor:
         v_min_pos = self.v_min.get()/255*w; v_max_pos = self.v_max.get()/255*w
         self.val_canvas.coords(self.val_overlay1, 0,0, v_min_pos, h); self.val_canvas.coords(self.val_overlay2, v_max_pos, 0, w, h)
 
-    # Handles slider changes for contrast and HSV values, updating the image display.
     def reset_hsv_defaults(self):
         self.contrast_value.set(1.0)
-        self.h_min.set(2)
-        self.h_max.set(91)
-        self.s_min.set(43)
-        self.s_max.set(164)
-        self.v_min.set(48)
-        self.v_max.set(196)
-        self.min_area.set(1500)
-        self.max_area.set(90000)   # Set your desired default maximum area here
-        self.on_slider_change(None)
+        self.h_min.set(2); self.h_max.set(91)
+        self.s_min.set(43); self.s_max.set(164)
+        self.v_min.set(48); self.v_max.set(196)
+        self.min_area.set(1500); self.max_area.set(90000)
+        
+        # Also reset the new ROI expansion variable
+        if self.roi_expansion_var:
+            self.roi_expansion_var.set(0)
 
+        self.on_slider_change(None)
     # Runs the entire detection pipeline, including contrast adjustment, HSV thresholding, contour detection, and ROI post-processing.
     def run_detection_pipeline(self):
-        if self.original_image is None: return
-        
+        if self.original_image is None:
+            return
+
         # 1. Apply contrast adjustment
         contrast = self.contrast_value.get()
         self.processed_image = cv2.convertScaleAbs(self.original_image, alpha=contrast, beta=0)
 
         # 2. Perform HSV thresholding on the contrast-adjusted image
         hsv_image = cv2.cvtColor(self.processed_image, cv2.COLOR_BGR2HSV)
-        lower=np.array([self.h_min.get(),self.s_min.get(),self.v_min.get()]); upper=np.array([self.h_max.get(),self.s_max.get(),self.v_max.get()])
+        lower = np.array([self.h_min.get(), self.s_min.get(), self.v_min.get()])
+        upper = np.array([self.h_max.get(), self.s_max.get(), self.v_max.get()])
         mask = cv2.inRange(hsv_image, lower, upper)
-        
+
         # 3. Find initial contours from the raw mask
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
+
         # 4. Post-process the contours
-        expansion = self.roi_expansion.get()
-        if expansion != 0:
-            # Create a mask from contours to expand/shrink
+        # --- THIS IS THE CORRECTED SECTION ---
+        expansion_float = self.roi_expansion_var.get()
+        expansion_pixels = int(expansion_float) # Explicitly convert float to integer
+
+        if expansion_pixels != 0:
+            # Create a temporary mask from the current contours to expand/shrink
             temp_mask = np.zeros_like(mask)
             cv2.drawContours(temp_mask, contours, -1, 255, -1)
-            kernel = np.ones((abs(expansion), abs(expansion)), np.uint8)
-            processed_mask = cv2.dilate(temp_mask, kernel) if expansion > 0 else cv2.erode(temp_mask, kernel)
-            contours, _ = cv2.findContours(processed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        # 5. Filter by area
+            
+            # Ensure the kernel size is at least 1x1 to prevent a cv2 error
+            kernel_size = abs(expansion_pixels)
+            if kernel_size > 0:
+                kernel = np.ones((kernel_size, kernel_size), np.uint8)
+                # Apply dilation (expand) or erosion (shrink)
+                if expansion_pixels > 0:
+                    processed_mask = cv2.dilate(temp_mask, kernel)
+                else:
+                    processed_mask = cv2.erode(temp_mask, kernel)
+                
+                # Find contours again on the modified mask
+                contours, _ = cv2.findContours(processed_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         min_a, max_a = self.min_area.get(), self.max_area.get()
         self.final_rois = [roi for roi in contours if min_a <= cv2.contourArea(roi) <= max_a]
-        
+
         self.deselect_roi()
         self.update_image_display()
 
@@ -850,20 +930,60 @@ class HumanInTheLoopProcessor:
             self._update_tkinter_label(self.mask_label, preview_mask, is_bgr=False)
 
     # Converts the OpenCV image to a format suitable for Tkinter display.
-    def _update_tkinter_label(self, tk_label, cv_image, is_bgr=True):
-        
-        if cv_image is None: return
+    def _update_tkinter_label(self, tk_widget, cv_image, is_bgr=True):
+        if cv_image is None:
+            return
+
+        # --- Step 1: Image preparation and scaling (this part is the same) ---
         img_rgb = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB) if is_bgr else cv_image
-        h, w = img_rgb.shape[:2]; label_w, label_h = tk_label.winfo_width(), tk_label.winfo_height()
-        if label_w <= 1 or label_h <= 1: tk_label.after(50, lambda: self._update_tkinter_label(tk_label, cv_image, is_bgr)); return
-        scale_fit = min(label_w / w, label_h / h); final_scale = scale_fit * self.preview_zoom_factor
+        h, w = img_rgb.shape[:2]
+        widget_w, widget_h = tk_widget.winfo_width(), tk_widget.winfo_height()
+
+        if widget_w <= 1 or widget_h <= 1:
+            tk_widget.after(50, lambda: self._update_tkinter_label(tk_widget, cv_image, is_bgr))
+            return
+
+        scale_fit = min(widget_w / w, widget_h / h)
+        final_scale = scale_fit * self.preview_zoom_factor
+
+        if self.preview_zoom_factor <= 1.0:
+            self.pan_offset_x, self.pan_offset_y = 0, 0
+
         new_w, new_h = int(w * final_scale), int(h * final_scale)
-        if tk_label == self.image_label:
-            self.last_render_info = {'scale': final_scale, 'offset_x': (label_w-new_w)//2, 'offset_y': (label_h-new_h)//2, 'img_w': new_w, 'img_h': new_h}
-        if new_w > 0 and new_h > 0:
-            resized_img = cv2.resize(img_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
-            img_pil = Image.fromarray(resized_img); img_tk = ImageTk.PhotoImage(image=img_pil)
-            tk_label.config(image=img_tk); tk_label.image = img_tk
+
+        if new_w <= 0 or new_h <= 0:
+            return
+
+        resized_img = cv2.resize(img_rgb, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        img_pil = Image.fromarray(resized_img)
+        img_tk = ImageTk.PhotoImage(image=img_pil)
+
+        # --- Step 2: Display Logic (this part is NEW and handles Canvas vs Label) ---
+        if tk_widget == self.image_label: # This is our main CANVAS
+            # Calculate the top-left coordinate for the image, including pan offset
+            offset_x = (widget_w - new_w) // 2 + self.pan_offset_x
+            offset_y = (widget_h - new_h) // 2 + self.pan_offset_y
+            
+            # Update the render info used for mouse clicks
+            self.last_render_info = {'scale': final_scale, 'offset_x': offset_x, 'offset_y': offset_y, 'img_w': new_w, 'img_h': new_h}
+
+            if self.canvas_image_id is None:
+                # First time drawing: create a new image item on the canvas
+                self.canvas_image_id = tk_widget.create_image(
+                    offset_x, offset_y, anchor='nw', image=img_tk
+                )
+            else:
+                # Image already exists: just move it and update its content
+                tk_widget.coords(self.canvas_image_id, offset_x, offset_y)
+                tk_widget.itemconfig(self.canvas_image_id, image=img_tk)
+                
+        else: # This is a different widget (like the mask preview Label)
+            # Use the old method for simple labels
+            tk_widget.config(image=img_tk)
+        
+        # IMPORTANT: Keep a reference to the image to prevent garbage collection
+        tk_widget.image = img_tk
+
 
     # Sets up the columns for the live results table.
     def update_live_results_columns(self):
@@ -886,6 +1006,29 @@ class HumanInTheLoopProcessor:
             item = self.results_tree.insert("", "end", values=values)
             if i == self.selected_roi_index: self.results_tree.selection_set(item)
 
+    # Callback for when a row in the live results table is clicked.
+    def on_results_tree_select(self, event):
+        """Callback when a row in the live results table is clicked."""
+        selected_item = self.results_tree.focus() # .focus() is better for single-click selection
+        if not selected_item:
+            return # User clicked on header or empty space
+
+        try:
+            # Get the values from the selected row
+            item_values = self.results_tree.item(selected_item, "values")
+            if not item_values:
+                return
+
+            # The first value in the tuple is the 'ID' column. It's a 1-based index.
+            roi_id_str = item_values[0]
+            # Convert to a zero-based index for our final_rois list
+            roi_index = int(roi_id_str) - 1
+
+            if 0 <= roi_index < len(self.final_rois):
+                self.select_roi(roi_index) # Use the existing select_roi method
+                print(f"ROI #{roi_index + 1} selected from table.")
+        except (ValueError, IndexError) as e:
+            print(f"Could not parse ROI ID from table row: {item_values}. Error: {e}")
     # Handles the acceptance of the current image and saves measurements.
     def handle_accept(self, event=None):
         if not self.image_paths: return
@@ -946,28 +1089,69 @@ class HumanInTheLoopProcessor:
         self.current_image_index += 1
         self.process_next_image()
 
+    def on_pan_start(self, event):
+        """Records the starting position of a pan drag. Called by handle_image_left_click."""
+        self.panning_active = True
+        self.image_label.config(cursor="fleur")
+        self.drag_start_x = event.x
+        self.drag_start_y = event.y
+
+    def on_pan_end(self, event=None): # event=None makes it safe for key bindings
+        """Resets the cursor and stops panning. Called by mouse or key release."""
+        if self.panning_active:
+            self.panning_active = False
+            self.image_label.config(cursor="")
+
+    def on_pan_drag(self, event):
+        """Updates the pan offset and redraws the image if panning is active."""
+        if self.panning_active: # This check is crucial
+            dx = event.x - self.drag_start_x
+            dy = event.y - self.drag_start_y
+
+            self.pan_offset_x += dx
+            self.pan_offset_y += dy
+
+            self.drag_start_x = event.x
+            self.drag_start_y = event.y
+
+            self.update_image_display()
+
     # Handles left-click events on the image label to select or draw ROIs.
     def handle_image_left_click(self, event):
-        info = self.last_render_info; img_x = int((event.x-info['offset_x'])/info['scale']); img_y = int((event.y-info['offset_y'])/info['scale'])
-        
-        ### NEW FEATURE: Divert click to color picker if active
+        # Check if the Shift key was held down during the click
+        # The bitmask for Shift is 1.
+        is_shift_pressed = (event.state & 1) != 0
+
+        # --- ROUTE 1: Start Panning ---
+        if is_shift_pressed and self.preview_zoom_factor > 1.0:
+            self.on_pan_start(event)
+            return # Do not proceed to ROI selection
+
+        # --- ROUTE 2: Normal Click Logic (select, draw, color pick) ---
+        info = self.last_render_info
+        img_x = int((event.x - info['offset_x']) / info['scale'])
+        img_y = int((event.y - info['offset_y']) / info['scale'])
+
         if self.color_picker_active:
             self.handle_color_pick(img_x, img_y)
             return
-            
+
         if self.drawing_mode:
             self.new_roi_points.append((img_x, img_y))
             if len(self.new_roi_points) >= 3:
                 self.finish_draw_btn.config(state=tk.NORMAL)
             self.update_image_display()
             return
-            
+
         clicked_roi_index = -1
         for i in range(len(self.final_rois) - 1, -1, -1):
             if cv2.pointPolygonTest(self.final_rois[i], (img_x, img_y), False) >= 0:
-                clicked_roi_index = i; break
-        if clicked_roi_index != -1: self.select_roi(clicked_roi_index)
-        else: self.deselect_roi()
+                clicked_roi_index = i
+                break
+        if clicked_roi_index != -1:
+            self.select_roi(clicked_roi_index)
+        else:
+            self.deselect_roi()
 
     # Enable/disable buttons based on whether an ROI is selected or not
     def update_roi_action_buttons(self):
