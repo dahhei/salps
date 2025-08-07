@@ -534,13 +534,14 @@ class HumanInTheLoopProcessor:
         self.color_picker_history = []
 
         # --- GUI Element Variables ---
+
         self.roi_expansion_label = None        
         self.mask_window, self.mask_label, self.results_tree, self.image_label = None, None, None, None
         self.file_browser_frame, self.file_browser_tree, self.left_pane = None, None, None
         self.delete_roi_btn, self.annotate_roi_btn = None, None
         self.draw_roi_btn, self.finish_draw_btn, self.cancel_draw_btn = None, None, None
         self.status_label = None
-        self.start_color_pick_btn, self.undo_color_pick_btn, self.finish_color_pick_btn = None, None, None
+        self.start_color_pick_btn, self.undo_color_pick_btn, self.finish_color_pick_btn, self.control_frame_id = None, None, None, None
         
         ### MODIFICATION ### - Variable to hold the HSV frame itself
         self.hsv_frame = None
@@ -552,6 +553,8 @@ class HumanInTheLoopProcessor:
         self.root.bind("<space>", self.handle_accept)
         self.root.bind("<Key-s>", self.handle_skip); self.root.bind("<Key-S>", self.handle_skip)
         self.root.bind("<Escape>", self.cancel_drawing)
+        self.root.bind("<Key-c>", self.toggle_color_picker_mode_shortcut)
+        self.root.bind("<Key-C>", self.toggle_color_picker_mode_shortcut)
 
         self.show_welcome_message()
         if self.prompt_for_directories():
@@ -592,6 +595,16 @@ class HumanInTheLoopProcessor:
         view_menu.add_command(label="Toggle Live Mask Preview", command=self.toggle_mask_window); view_menu.add_separator()
         view_menu.add_command(label="Show/Hide File Browser", command=self.toggle_file_browser)
 
+    def _setup_action_panel(self, parent):
+        """Creates the final action buttons on the right pane."""
+        ui_font = ("Helvetica", 9, "bold")
+        action_frame = tk.LabelFrame(parent, text="Final Actions", padx=10, pady=10, font=ui_font)
+        parent.add(action_frame) # Add to the PanedWindow
+
+        tk.Button(action_frame, text="Reset HSV Controls", command=self.reset_hsv_defaults).pack(fill=tk.X, pady=2)
+        tk.Button(action_frame, text="Accept & Next (Space)", command=self.handle_accept, bg="#4CAF50", fg="black", height=2).pack(fill=tk.X, pady=3)
+        tk.Button(action_frame, text="Skip Image (S)", command=self.handle_skip, bg="#FF9800", fg="black", height=2).pack(fill=tk.X, pady=3)
+
 
     def setup_gui(self):
         status_frame = tk.Frame(self.root, relief=tk.SUNKEN, bd=1); status_frame.pack(side=tk.BOTTOM, fill=tk.X)
@@ -619,6 +632,15 @@ class HumanInTheLoopProcessor:
         self.file_browser_tree.pack(fill='both', expand=True)
         self.file_browser_tree.bind("<Double-1>", self.on_file_browser_jump)
 
+    def toggle_color_picker_mode_shortcut(self, event=None):
+        """Toggles the color picker mode on or off. Called by a keyboard shortcut."""
+        if self.color_picker_active:
+            # If it's on, turn it off.
+            self.exit_color_picker_mode()
+        else:
+            # If it's off, turn it on.
+            self.enter_color_picker_mode()
+            
     def _setup_control_panel(self, parent):
         """Creates the entire scrollable LEFT control panel with its widgets."""
         # --- Boilerplate for scrollable frame ---
@@ -627,26 +649,46 @@ class HumanInTheLoopProcessor:
         canvas_controls = tk.Canvas(outer_control_frame, highlightthickness=0)
         scrollbar = ttk.Scrollbar(outer_control_frame, orient="vertical", command=canvas_controls.yview)
         canvas_controls.configure(yscrollcommand=scrollbar.set)
+        
         control_frame = tk.Frame(canvas_controls, padx=10, pady=10)
-        canvas_controls.create_window((0, 0), window=control_frame, anchor="nw")
+
+        ### MODIFICATION 1: Capture the ID of the window item ###
+        self.control_frame_id = canvas_controls.create_window((0, 0), window=control_frame, anchor="nw")
+
+        # This binding adjusts the scrollable HEIGHT of the canvas
         control_frame.bind("<Configure>", lambda e: canvas_controls.configure(scrollregion=canvas_controls.bbox("all")))
+        
+        ### MODIFICATION 2: Add a NEW binding to adjust the WIDTH ###
+        def on_canvas_configure(event):
+            # This function runs whenever the canvas is resized.
+            # It tells the canvas to set the width of the item holding our frame.
+            canvas_controls.itemconfig(self.control_frame_id, width=event.width)
+        canvas_controls.bind("<Configure>", on_canvas_configure)
+        ### END OF MODIFICATIONS ###
+
         def on_mouse_wheel(event):
             canvas_controls.yview_scroll(int(-1*(event.delta/120)), "units")
         control_frame.bind_all("<MouseWheel>", on_mouse_wheel)
+
         scrollbar.pack(side="right", fill="y")
         canvas_controls.pack(side="left", fill="both", expand=True)
 
-        # --- Add all controls to the 'control_frame' ---
+        # --- (The rest of this method, where you create all the buttons and sliders,
+        # ---  remains EXACTLY the same as before. No changes are needed there.) ---
         ui_font = ("Helvetica", 9, "bold")
         self.progress_label = tk.Label(control_frame, text="Progress: N/A", font=("Helvetica", 10))
         self.progress_label.pack(pady=(0, 10), anchor='w')
 
+        # ... all your LabelFrames, Scales, Buttons, etc. ...
+        # (Image Adjustments frame...)
         img_adj_frame = tk.LabelFrame(control_frame, text="Image Adjustments", padx=5, pady=5, font=ui_font)
         img_adj_frame.pack(fill=tk.X, pady=5)
         self.contrast_value = tk.DoubleVar(value=1.0)
         tk.Scale(img_adj_frame, from_=0.5, to=3.0, orient=tk.HORIZONTAL, resolution=0.1, label="Contrast", variable=self.contrast_value, command=self.on_slider_change).pack(fill=tk.X)
 
+        # (HSV frame...)
         self.hsv_frame = tk.LabelFrame(control_frame, text="HSV Color Thresholding", padx=5, pady=5, font=ui_font)
+        # ... hsv setup code ...
         def create_hsv_section(p, text, hsv_type):
             f = tk.LabelFrame(p, text=text, padx=5, pady=5, font=ui_font); f.pack(fill=tk.X, pady=2)
             c = tk.Canvas(f, width=300, height=20, bg='black', highlightthickness=0); c.pack()
@@ -658,10 +700,10 @@ class HumanInTheLoopProcessor:
         self.val_canvas, self.v_min, self.v_max = create_hsv_section(self.hsv_frame, "Value", 'v')
         self._create_hsv_bars()
         
-        # Use self.adj_frame to make the HSV toggle robust
+        # (ROI Post-Processing frame...)
         self.adj_frame = tk.LabelFrame(control_frame, text="ROI Post-Processing", padx=5, pady=5, font=ui_font)
         self.adj_frame.pack(fill=tk.X, pady=5)
-
+        # ... roi expansion slider code ...
         self.roi_expansion_var = tk.DoubleVar(value=0)
         tk.Label(self.adj_frame, text="Expand/Shrink (px):").pack(anchor='w')
         roi_slider_frame = tk.Frame(self.adj_frame)
@@ -674,56 +716,45 @@ class HumanInTheLoopProcessor:
         def _update_roi_label(*args):
             self.roi_expansion_label.config(text=f"{int(self.roi_expansion_var.get())}")
         self.roi_expansion_var.trace_add("write", _update_roi_label)
-
+        
+        # ... min/max area sliders ...
         self.min_area = tk.Scale(self.adj_frame, from_=0, to=50000, orient=tk.HORIZONTAL, label="Min Area (px²)", command=self.on_slider_change)
         self.min_area.pack(fill=tk.X)
         self.max_area = tk.Scale(self.adj_frame, from_=0, to=500000, orient=tk.HORIZONTAL, label="Max Area (px²)", command=self.on_slider_change)
         self.max_area.pack(fill=tk.X)
 
+        # (Color Picker Tool frame...)
         picker_tools_frame = tk.LabelFrame(control_frame, text="Color Picker Tool", padx=5, pady=5, font=ui_font)
         picker_tools_frame.pack(fill=tk.X, pady=5)
         tk.Button(picker_tools_frame, text="Show/Hide HSV Controls", command=self.toggle_hsv_section).pack(fill=tk.X, pady=(0, 5))
+        # ... color picker grid code ...
         picker_grid = tk.Frame(picker_tools_frame)
         picker_grid.pack(fill=tk.X)
-        self.start_color_pick_btn = tk.Button(picker_grid, text="Start Color Picking", command=self.enter_color_picker_mode)
-        self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Last Pick", command=self.undo_last_color_pick)
-        self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Picking", command=self.exit_color_picker_mode)
-        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
-        picker_grid.columnconfigure(0, weight=1)
-        picker_grid.columnconfigure(1, weight=1)
+        picker_grid.columnconfigure(0, weight=1); picker_grid.columnconfigure(1, weight=1); picker_grid.columnconfigure(2, weight=1)
+        self.start_color_pick_btn = tk.Button(picker_grid, text="Select Colors (C)", command=self.enter_color_picker_mode, pady=5)
+        self.start_color_pick_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
+        self.undo_color_pick_btn = tk.Button(picker_grid, text="Undo Pick", command=self.undo_last_color_pick, pady=5)
+        self.undo_color_pick_btn.grid(row=0, column=1, sticky='ew', padx=2)
+        self.finish_color_pick_btn = tk.Button(picker_grid, text="Finish Selecting (C)", command=self.exit_color_picker_mode, pady=5)
+        self.finish_color_pick_btn.grid(row=0, column=2, sticky='ew', padx=(2,0))
 
-        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font)
-        roi_tools_frame.pack(fill=tk.X, pady=5)
-        tools_grid = tk.Frame(roi_tools_frame)
-        tools_grid.pack(fill=tk.X)
+        # (ROI Tools frame...)
+        roi_tools_frame = tk.LabelFrame(control_frame, text="ROI Tools", padx=5, pady=5, font=ui_font); roi_tools_frame.pack(fill=tk.X, pady=5)
+        # ... draw roi grid code ...
+        tools_grid = tk.Frame(roi_tools_frame); tools_grid.pack(fill=tk.X)
         self.draw_roi_btn = tk.Button(tools_grid, text="Draw New ROI", command=self.enter_drawing_mode)
         self.finish_draw_btn = tk.Button(tools_grid, text="Finish Drawing", command=self.finalize_roi, state=tk.DISABLED, bg="#FFFFFF", fg="black")
         self.cancel_draw_btn = tk.Button(tools_grid, text="Cancel Drawing", command=self.cancel_drawing)
-        self.draw_roi_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
-        tools_grid.columnconfigure(0, weight=1)
-        tools_grid.columnconfigure(1, weight=1)
+        self.draw_roi_btn.grid(row=0, column=0, columnspan=2, sticky='ew'); tools_grid.columnconfigure(0, weight=1); tools_grid.columnconfigure(1, weight=1)
 
-        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font)
-        sel_action_frame.pack(fill=tk.X, pady=5)
-        action_grid = tk.Frame(sel_action_frame)
-        action_grid.pack(fill=tk.X)
+        # (Selected ROI Actions frame...)
+        sel_action_frame = tk.LabelFrame(control_frame, text="Selected ROI Actions", padx=5, pady=5, font=ui_font); sel_action_frame.pack(fill=tk.X, pady=5)
+        # ... delete/annotate grid code ...
+        action_grid = tk.Frame(sel_action_frame); action_grid.pack(fill=tk.X)
         self.delete_roi_btn = tk.Button(action_grid, text="Delete Selected ROI", command=self.delete_selected_roi, state=tk.DISABLED)
         self.delete_roi_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
         self.annotate_roi_btn = tk.Button(action_grid, text="Annotate Selected ROI", command=self.annotate_selected_roi, state=tk.DISABLED)
-        self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0))
-        action_grid.columnconfigure(0, weight=1)
-        action_grid.columnconfigure(1, weight=1)
-
-    def _setup_action_panel(self, parent):
-        """Creates the final action buttons on the right pane."""
-        ui_font = ("Helvetica", 9, "bold")
-        action_frame = tk.LabelFrame(parent, text="Final Actions", padx=10, pady=10, font=ui_font)
-        parent.add(action_frame) # Add to the PanedWindow
-
-        tk.Button(action_frame, text="Reset HSV Controls", command=self.reset_hsv_defaults).pack(fill=tk.X, pady=2)
-        tk.Button(action_frame, text="Accept & Next (Space)", command=self.handle_accept, bg="#4CAF50", fg="black", height=2).pack(fill=tk.X, pady=3)
-        tk.Button(action_frame, text="Skip Image (S)", command=self.handle_skip, bg="#FF9800", fg="black", height=2).pack(fill=tk.X, pady=3)
-        
+        self.annotate_roi_btn.grid(row=0, column=1, sticky='ew', padx=(2,0)); action_grid.columnconfigure(0, weight=1); action_grid.columnconfigure(1, weight=1)    
     def _setup_viewer_and_results(self, parent):
         """Creates the image viewer and the live results table in the middle pane."""
         
@@ -849,7 +880,7 @@ class HumanInTheLoopProcessor:
         self.h_min.set(2); self.h_max.set(91)
         self.s_min.set(43); self.s_max.set(164)
         self.v_min.set(48); self.v_max.set(196)
-        self.min_area.set(1500); self.max_area.set(90000)
+        self.min_area.set(1500); self.max_area.set(140000)
         
         # Also reset the new ROI expansion variable
         if self.roi_expansion_var:
@@ -1226,21 +1257,27 @@ class HumanInTheLoopProcessor:
     ### NEW FEATURE: Color Picker Methods
     def enter_color_picker_mode(self):
         self.cancel_drawing() # Ensure drawing mode is off
+        
+        # Set the state
         self.color_picker_active = True
         self.color_picker_history = []
+        
+        # Update the UI using our new reliable function
+        self._update_color_picker_buttons()
+        
+        # Update cursor and status message
         self.image_label.config(cursor="tcross")
-        self.status_label.config(text="COLOR PICKER MODE: Click on the image to select a color range. Click multiple times to expand.")
-        self.start_color_pick_btn.grid_remove()
-        self.undo_color_pick_btn.grid(row=0, column=0, sticky='ew', padx=(0,2))
-        self.finish_color_pick_btn.grid(row=0, column=1, sticky='ew', padx=(2,0))
-        self.undo_color_pick_btn.config(state=tk.DISABLED)
+        self.status_label.config(text="COLOR PICKER MODE: Click on the image to select a color range. Press 'c' to exit.")
 
     def exit_color_picker_mode(self):
+        # Set the state
         self.color_picker_active = False
+        
+        # Update the UI using our new reliable function
+        self._update_color_picker_buttons()
+        
+        # Update cursor and status message
         self.image_label.config(cursor="")
-        self.undo_color_pick_btn.grid_remove()
-        self.finish_color_pick_btn.grid_remove()
-        self.start_color_pick_btn.grid(row=0, column=0, columnspan=2, sticky='ew')
         self.update_roi_action_buttons()
 
     def handle_color_pick(self, img_x, img_y):
@@ -1269,7 +1306,27 @@ class HumanInTheLoopProcessor:
             self.v_min.set(min(self.v_min.get(), v)); self.v_max.set(max(self.v_max.get(), v))
 
         self.on_slider_change(None) # Update the display with new values
+        self._update_color_picker_buttons()
 
+    def _update_color_picker_buttons(self):
+        """
+        Centralized function to enable/disable the color picker buttons
+        based on the current application state.
+        """
+        if self.color_picker_active:
+            # State: Color Picker is ON
+            self.start_color_pick_btn.config(state=tk.DISABLED)
+            self.finish_color_pick_btn.config(state=tk.NORMAL)
+            
+            # The undo button is only usable if there's something in the history
+            undo_state = tk.NORMAL if self.color_picker_history else tk.DISABLED
+            self.undo_color_pick_btn.config(state=undo_state)
+        else:
+            # State: Color Picker is OFF
+            self.start_color_pick_btn.config(state=tk.NORMAL)
+            self.finish_color_pick_btn.config(state=tk.DISABLED)
+            self.undo_color_pick_btn.config(state=tk.DISABLED)
+            
         ### NEW FEATURE: On-Demand Scale Recalibration ###
     def recalibrate_scale(self):
         if self.original_image is None:
@@ -1369,14 +1426,30 @@ class HumanInTheLoopProcessor:
 
     # Undoes the last color pick, restoring the previous HSV values.    
     def undo_last_color_pick(self):
-        if self.color_picker_history:
-            last_state = self.color_picker_history.pop()
-            self.h_min.set(last_state[0]); self.h_max.set(last_state[1])
-            self.s_min.set(last_state[2]); self.s_max.set(last_state[3])
-            self.v_min.set(last_state[4]); self.v_max.set(last_state[5])
-            self.on_slider_change(None)
+        """Undoes the last color pick by reverting the HSV sliders."""
         if not self.color_picker_history:
-            self.undo_color_pick_btn.config(state=tk.DISABLED)
+            return # Nothing to undo
+
+        # Remove the last pick and get the state before it
+        self.color_picker_history.pop()
+        if self.color_picker_history:
+            # Revert to the previous state in history
+            h_min, h_max, s_min, s_max, v_min, v_max = self.color_picker_history[-1]
+        else:
+            # If history is now empty, revert to some default or clear state
+            # For this example, let's just clear them to a wide range
+            h_min, h_max, s_min, s_max, v_min, v_max = 0, 179, 0, 255, 0, 255
+
+        # Set the sliders to the reverted values
+        self.h_min.set(h_min); self.h_max.set(h_max)
+        self.s_min.set(s_min); self.s_max.set(s_max)
+        self.v_min.set(v_min); self.v_max.set(v_max)
+        
+        # Manually trigger the image processing pipeline
+        self.on_slider_change(None)
+        
+        # Crucially, update the button states
+        self._update_color_picker_buttons()
 
     # Handles the closing of the main application window, prompting the user to confirm if they want to exit.
     def on_preview_zoom(self, event=None, reset=False):
@@ -1420,7 +1493,7 @@ class HumanInTheLoopProcessor:
 
     #  Displays a welcome message with instructions for using the application.
     def show_welcome_message(self):
-        messagebox.showinfo("Welcome!", "Welcome to SALP v3.0!\n\n- Use the new 'Color Picker Tool' to quickly set HSV values.\n- Select input and output folders.\n- Use the controls to adjust detection.\n- Left-click an ROI to select it, then use the action buttons.")
+        messagebox.showinfo("Welcome!", "Welcome to SALP v3.5!\n\n- Use the 'Color Picker Tool' to select objects.\n- Select input and output folders.\n- Set your scale.\n- Left-click an ROI to select it")
 
     # Prompts the user to select input and output directories, initializes the session, and loads the image list.
     def prompt_for_directories(self):
